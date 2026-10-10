@@ -9,6 +9,9 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from mailquill.fees import merge_foreign_fees
+from mailquill.schema import FIELDS, Transaction
+
 
 @dataclass
 class ReportData:
@@ -44,15 +47,25 @@ def aggregate(db_path: str) -> ReportData:
             "FROM transactions GROUP BY ym ORDER BY ym"
         ).fetchall()
         detail = cur.execute(
-            "SELECT date, merchant_norm, amount, category_l1, category_l2, "
-            "bank, account_last4 FROM transactions ORDER BY date DESC, rowid DESC"
+            f"SELECT {', '.join(FIELDS)} FROM transactions "
+            "ORDER BY date DESC, rowid DESC"
         ).fetchall()
-        rows = [
-            {"date": r[0], "month": (r[0] or "")[:7], "merchant": r[1],
-             "amount": _to_float(r[2]), "l1": r[3], "l2": r[4],
-             "bank": r[5], "last4": r[6]}
+        txns = [
+            Transaction.from_row({k: ("" if v is None else str(v)) for k, v in zip(FIELDS, r)})
             for r in detail
         ]
+        # 國外手續費併進原消費一起顯示（見 fees.merge_foreign_fees）
+        rows = [
+            {"date": t.date, "month": (t.date or "")[:7], "merchant": t.merchant_norm,
+             "amount": _to_float(t.amount), "l1": t.category_l1, "l2": t.category_l2,
+             "bank": t.bank, "last4": t.account_last4, "currency": t.currency or "TWD",
+             "fee": m.fee}
+            for m in merge_foreign_fees(txns)
+            for t in [m.txn]
+        ]
+        # total/by_l1/by_month 混合所有幣別加總，不被 render_html 使用（只給
+        # 想直接用 aggregate() 的呼叫者/測試做粗略檢視）；畫面上實際顯示的
+        # 統計數字改由 JS 端依 state.currency 篩選單一幣別後才計算，見 _JS。
         return ReportData(
             total=float(total),
             count=int(count),
@@ -69,7 +82,8 @@ def _embed(rows: list[dict]) -> str:
     data = [
         {"date": r["date"], "month": r["month"], "amount": r["amount"],
          "l1": r["l1"], "l2": r["l2"], "bank": r["bank"],
-         "merchant": r["merchant"], "last4": r.get("last4", "")}
+         "merchant": r["merchant"], "last4": r.get("last4", ""),
+         "currency": r.get("currency", "TWD"), "fee": r.get("fee", 0.0)}
         for r in rows
     ]
     s = json.dumps(data, ensure_ascii=False)
@@ -192,6 +206,7 @@ section { background: var(--panel); border: 1px solid var(--border); border-radi
 .toggle button.on { background: var(--chipOn); color: var(--panel); border-color: var(--chipOn); }
 .toggle button:first-child { border-radius: 8px 0 0 8px; }
 .toggle button:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+.feenote { font-size: .75rem; font-weight: normal; color: var(--muted); margin-top: .15rem; white-space: nowrap; }
 .cards { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
 .card { background: linear-gradient(160deg, var(--panel2), var(--card)); border: 1px solid var(--border);
         border-radius: 14px; padding: 0.9rem 1.15rem 1rem; min-width: 138px; position: relative;
@@ -288,6 +303,8 @@ _BODY = """
     <span class="fg"><span class="lbl">月份</span>
       <select id="f-from"></select><span>～</span><select id="f-to"></select></span>
     <span class="fg"><span class="lbl">銀行</span><span class="chips" id="f-banks"></span></span>
+    <span class="fg" id="f-currency-wrap" style="display:none">
+      <span class="lbl">幣別</span><span class="chips" id="f-currency"></span></span>
     <span class="fg"><span class="lbl">品類模式</span>
       <span class="toggle sm"><button class="on" data-l2mode="include">包含</button><button data-l2mode="exclude">排除</button></span>
     </span>
@@ -373,7 +390,14 @@ function sliceColor(label,i,opt){ return opt.bank ? bankMeta(label).c : PALETTE[
 
 const months = [...new Set(DATA.map(r=>r.month))].filter(Boolean).sort();
 const allBanks = [...new Set(DATA.map(r=>r.bank))];
-const L1ORDER = ['食','衣','住','行','育','樂','保險','醫療','購物','其他','未分類'];
+const allCurrencies = [...new Set(DATA.map(r=>r.currency))];
+function defaultCurrency(){
+  // 依筆數最多的幣別當預設，避免一開啟就把不同幣別金額混在一起加總。
+  const cnt = new Map();
+  for(const r of DATA){ cnt.set(r.currency, (cnt.get(r.currency)||0)+1); }
+  return ([...cnt.entries()].sort((a,b)=>b[1]-a[1])[0] || ['TWD'])[0];
+}
+const L1ORDER = ['Food','Housing','Transport','Education','Entertainment','Insurance','Medical','Shopping','Other','Uncategorized'];
 const l1rank = x => { const i=L1ORDER.indexOf(x); return i<0 ? 999 : i; };
 const allCats = [...new Set(DATA.map(r=>r.l1))]
   .sort((a,b)=> l1rank(a)-l1rank(b) || (a<b?-1:a>b?1:0));
@@ -386,7 +410,8 @@ const SEP = '\\u241f';                          // 葉節點 key = 第一層 + S
 const leafKey = r => r.l1 + SEP + (r.l2||"");
 const l1LeafKeys = l1 => [...(l2ByL1.get(l1)||new Map()).keys()].map(c=>l1+SEP+(c||""));
 const state = { banks:new Set(), leaves:new Set(), l2mode:'include',
-                from: months[0]||"", to: months[months.length-1]||"", chartMode:'bar' };
+                from: months[0]||"", to: months[months.length-1]||"", chartMode:'bar',
+                currency: defaultCurrency() };
 const sortState = { col:'date', dir:'desc' };
 
 function inCat(r){
@@ -397,6 +422,7 @@ function inCat(r){
 function filtered(){
   return DATA.filter(r=>
     (state.banks.size===0 || state.banks.has(r.bank)) &&
+    r.currency === state.currency &&
     inCat(r) &&
     (!r.month || (r.month>=state.from && r.month<=state.to)));
 }
@@ -446,8 +472,20 @@ function donut(items, opt){
     '<circle class="hole" cx="80" cy="80" r="44"/></svg><div class="legend">'+legend+'</div></div>';
 }
 function chart(items, opt){ return state.chartMode==='pie' ? donut(items, opt) : bars(items, opt); }
+// 併進原消費的國外手續費：金額欄顯示總額，下方拆成「消費 + 手續費」
+function feeNote(r){ return (r.fee && r.fee!==r.amount)
+  ? '<div class="feenote">'+fmt(r.amount-r.fee)+' + 手續費 '+fmt(r.fee)+'</div>' : ''; }
 function card(k,v){ return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>'; }
 
+function renderCurrencyChips(){
+  const wrap = document.getElementById('f-currency-wrap');
+  if(allCurrencies.length<=1){ wrap.style.display='none'; return; }
+  wrap.style.display='';
+  document.getElementById('f-currency').innerHTML = allCurrencies.map(c=>{
+    const on = c===state.currency ? ' on' : '';
+    return '<button class="chip'+on+'" data-currency="'+esc(c)+'">'+esc(c)+'</button>';
+  }).join('');
+}
 function renderChips(){
   document.getElementById('f-banks').innerHTML = allBanks.map(b=>{
     const m=bankMeta(b); const on=state.banks.has(b)?' on':'';
@@ -478,8 +516,10 @@ function render(){
   const mset = new Set(rows.map(r=>r.month).filter(Boolean));
   const sign = v => '<span class="'+(v<0?'neg':'pos')+'">'+fmt(v)+'</span>';
   document.getElementById('cards').innerHTML =
-    card('淨消費', sign(total)) + card('筆數', rows.length) +
-    card('月份數', mset.size) + card('平均/月', mset.size? sign(total/mset.size) : '0');
+    card('淨消費 ('+esc(state.currency)+')', sign(total)) + card('筆數', rows.length) +
+    card('月份數', mset.size) +
+    card('平均/月 ('+esc(state.currency)+')', mset.size? sign(total/mset.size) : '0') +
+    card('國外手續費 ('+esc(state.currency)+')', sign(rows.reduce((s,r)=>s+(r.fee||0),0)));
   const byMonth = groupSum(rows, r=>r.month).sort((a,b)=> a[0]<b[0]?-1:a[0]>b[0]?1:0);
   document.getElementById('v-month').innerHTML = bars(byMonth);
   document.getElementById('v-bank').innerHTML = chart(groupSum(rows, r=>r.bank), {bank:true});
@@ -497,7 +537,7 @@ function render(){
   const cap = 1000, shown = sorted.slice(0, cap);
   document.getElementById('detail').innerHTML = shown.map(r=>
     '<tr><td>'+esc(r.date)+'</td><td>'+esc(r.merchant)+'</td>'+
-    '<td class="amt '+(r.amount<0?'neg':'pos')+'">'+fmt(r.amount)+'</td><td>'+esc(r.l1)+'</td>'+
+    '<td class="amt '+(r.amount<0?'neg':'pos')+'">'+fmt(r.amount)+feeNote(r)+'</td><td>'+esc(r.l1)+'</td>'+
     '<td>'+esc(r.l2)+'</td><td>'+badge(r.bank)+'</td></tr>').join('');
   document.getElementById('detail-note').textContent =
     rows.length + ' 筆' + (rows.length>cap ? '（僅顯示前 '+cap+'）' : '');
@@ -511,20 +551,21 @@ function paintSort(){
   });
 }
 function renderUncat(){
-  const m = new Map();   // merchant -> {sum, cnt}
+  const m = new Map();   // "商家|幣別" -> {sum, cnt, merchant, currency}
   for(const r of DATA){
-    if(r.l1 !== '未分類') continue;
-    const k = r.merchant || '';
-    const e = m.get(k) || {sum:0, cnt:0};
-    e.sum += Math.abs(r.amount); e.cnt++; m.set(k, e);
+    if(r.l1 !== 'Uncategorized') continue;
+    const k = (r.merchant||'') + SEP + (r.currency||'');
+    const e = m.get(k) || {sum:0, cnt:0, merchant:r.merchant, currency:r.currency};
+    e.sum += r.amount; e.cnt++; m.set(k, e);  // 淨額（非絕對值加總）：訂房被全額退款的話淨影響是 0，
+                                                // 不該因為 abs 加總被誤判成大額待分類
   }
-  const items = [...m.entries()].sort((a,b)=>b[1].sum-a[1].sum);
+  const items = [...m.values()].sort((a,b)=>Math.abs(b.sum)-Math.abs(a.sum));
   const tb = document.getElementById('uncat-rows');
   if(!items.length){ tb.innerHTML = '<tr><td colspan="5" class="empty">沒有未分類，讚！</td></tr>'; return; }
-  tb.innerHTML = items.map(([mer,e])=>
+  tb.innerHTML = items.map(e=>
     '<tr>'+
-    '<td><input class="tag kw" value="'+esc(mer)+'" style="width:15rem"></td>'+
-    '<td class="amt">'+fmt(e.sum)+'</td><td>'+e.cnt+'</td>'+
+    '<td><input class="tag kw" value="'+esc(e.merchant)+'" style="width:15rem"></td>'+
+    '<td class="amt">'+fmt(e.sum)+' '+esc(e.currency)+'</td><td>'+e.cnt+'</td>'+
     '<td><input class="tag l1" list="l1list" style="width:5rem"></td>'+
     '<td><input class="tag l2" style="width:8rem"></td>'+
     '</tr>').join('');
@@ -538,6 +579,11 @@ document.getElementById('f-banks').addEventListener('click', e=>{
   const el=e.target.closest('[data-bank]'); if(!el) return;
   const v=el.dataset.bank; state.banks.has(v)?state.banks.delete(v):state.banks.add(v);
   renderChips(); render();
+});
+document.getElementById('f-currency').addEventListener('click', e=>{
+  const el=e.target.closest('[data-currency]'); if(!el) return;
+  state.currency = el.dataset.currency;
+  renderCurrencyChips(); render();
 });
 document.getElementById('f-cattree').addEventListener('click', e=>{
   const c=e.target.closest('[data-cat]');
@@ -571,8 +617,9 @@ document.getElementById('f-to').addEventListener('change', e=>{ state.to=e.targe
 document.getElementById('f-reset').addEventListener('click', ()=>{
   state.banks.clear(); state.leaves.clear(); state.l2mode='include';
   state.from=months[0]||""; state.to=months[months.length-1]||"";
+  state.currency = defaultCurrency();
   document.querySelectorAll('[data-l2mode]').forEach(x=>x.classList.toggle('on', x.dataset.l2mode==='include'));
-  fillMonths(); renderChips(); render();
+  fillMonths(); renderChips(); renderCurrencyChips(); render();
 });
 document.getElementById('gen-rules').addEventListener('click', ()=>{
   const lines = [];
@@ -609,7 +656,7 @@ applyTheme(_t);
 document.getElementById('theme-btn').addEventListener('click', ()=>{
   applyTheme(document.documentElement.dataset.theme==='dark' ? 'light' : 'dark');
 });
-fillMonths(); renderChips(); render(); renderUncat();
+fillMonths(); renderChips(); renderCurrencyChips(); render(); renderUncat();
 """
 
 
