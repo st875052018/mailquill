@@ -106,7 +106,7 @@ def _migrate_ids(cfg_path: str, apply: bool) -> int:
     if not apply:
         print("  未寫檔。確認以上內容後加 --apply 才會實際遷移。")
         return 0
-    if plan.changed == 0 and not plan.removed:
+    if plan.changed == 0 and not plan.removed and plan.txns == txns:
         print("  無需遷移，未寫檔。")
         return 0
 

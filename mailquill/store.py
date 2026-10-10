@@ -136,7 +136,8 @@ def _rekey_csv_txns(txns: list[Transaction]) -> tuple[list[Transaction], int]:
 
     舊版用列在檔案中的位置當 seq，兩份日期範圍重疊的匯出檔會算出不同
     txn_id 而重複入帳；新版（見 ingest.py）改成出現次序，這裡把舊資料轉成
-    同一套編號。冪等：已是新編號的列不會再變。
+    同一套編號，並把 seq 存進 CSV（migrate-ids 靠它認得這些列已是現行公式）。
+    冪等：已是新編號的列不會再變。
     """
     occurrences: Counter = Counter()
     out: list[Transaction] = []
@@ -149,8 +150,8 @@ def _rekey_csv_txns(txns: list[Transaction]) -> tuple[list[Transaction], int]:
         seq = occurrences[key]
         occurrences[key] += 1
         new_id = make_txn_id(t.bank, t.account_last4, t.date, t.amount, t.merchant_raw, seq)
-        if new_id != t.txn_id:
-            t = replace(t, txn_id=new_id)
+        if new_id != t.txn_id or t.seq != str(seq):
+            t = replace(t, txn_id=new_id, seq=str(seq))
             changed += 1
         out.append(t)
     return out, changed

@@ -168,11 +168,12 @@ def test_rekey_csv_rows_uses_occurrence_index_not_row_position(tmp_path):
     pdf_row = _txn("PDFSHOP")
     write_transactions_atomic(path, [csv_txn("A", 0), csv_txn("B", 1), csv_txn("A", 2), pdf_row])
 
-    assert rekey_csv_rows(path) == 2  # 第一個 A 舊 seq 本來就是 0
+    assert rekey_csv_rows(path) == 3  # B 與第二個 A 的 id 變了；第一個 A 只是補上 seq
     rows = read_transactions(path)
     ids = {(r.merchant_raw, i): r.txn_id for i, r in enumerate(rows)}
     assert ids[("A", 0)] == make_txn_id("Amex", "9", "2026-06-01", "100.00", "A", 0)
     assert ids[("B", 1)] == make_txn_id("Amex", "9", "2026-06-01", "100.00", "B", 0)
     assert ids[("A", 2)] == make_txn_id("Amex", "9", "2026-06-01", "100.00", "A", 1)
-    assert rows[3].txn_id == pdf_row.txn_id          # 非 csv 來源不動
+    assert [r.seq for r in rows[:3]] == ["0", "0", "1"]   # seq 一併存進 CSV，migrate-ids 才認得
+    assert rows[3].txn_id == pdf_row.txn_id and rows[3].seq == ""   # 非 csv 來源不動
     assert rekey_csv_rows(path) == 0                  # 冪等

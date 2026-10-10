@@ -121,3 +121,27 @@ def test_run_warns_before_fetching_when_csv_has_legacy_ids(monkeypatch, tmp_path
     assert cli.main(["run", "--config", "x.yaml"]) == 0
     out = capsys.readouterr().out
     assert "migrate-ids" in out, "沒有提示先跑 migrate-ids"
+
+
+def test_apply_fills_missing_seq_even_when_ids_are_already_current(tmp_path):
+    # id 已是現行公式、只是 CSV 沒存 seq：apply 仍要把 seq 補上，不然舊式 id 警告永遠消不掉
+    from dataclasses import replace
+    from mailquill.cli import main
+    from mailquill.schema import Transaction, make_txn_id
+    from mailquill.store import count_legacy_id_rows, read_transactions, write_transactions_atomic
+    csv_path, db_path = str(tmp_path / "t.csv"), str(tmp_path / "t.db")
+    t = Transaction(
+        txn_id=make_txn_id("Cathay", "1234", "2026-06-01", "100", "全聯", 0),
+        date="2026-06-01", post_date="", amount="100", currency="TWD", merchant_raw="全聯",
+        merchant_norm="全聯", category_l1="Food", category_l2="", bank="Cathay",
+        account_last4="1234", source_type="pdf", source_msg_id="m1", raw_ref="m1",
+        imported_at="2026-06-29T10:00:00", seq="")
+    write_transactions_atomic(csv_path, [t])
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(f"label: x\ncsv_path: {csv_path}\ndb_path: {db_path}\n", encoding="utf-8")
+    assert count_legacy_id_rows(csv_path) == 1
+
+    assert main(["migrate-ids", "--config", str(cfg), "--apply"]) == 0
+
+    assert count_legacy_id_rows(csv_path) == 0
+    assert read_transactions(csv_path)[0].txn_id == t.txn_id

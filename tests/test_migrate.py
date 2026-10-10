@@ -99,3 +99,33 @@ def test_seq_is_scoped_per_message_and_import():
         _legacy("C", msg_id="m2"),
     ])
     assert [t.seq for t in plan.txns] == ["0", "1", "0"]
+
+
+def test_row_with_stored_seq_matching_its_id_is_already_current_even_if_position_differs():
+    # CSV 匯入的列用「同日同店同額第幾次出現」當 seq 並存進 CSV，跟列在群組內的位置
+    # 無關；id 與存下來的 seq 吻合就是現行公式，不能被歸成「無法歸類」。
+    a = _txn("A", seq="0")
+    b = _txn("B", seq="0")      # 位置是 1，但 seq 存的是 0
+    plan = plan_migration([a, b])
+    assert plan.unexplained == []
+    assert plan.changed == 0
+    assert [t.seq for t in plan.txns] == ["0", "0"]
+    assert [t.txn_id for t in plan.txns] == [a.txn_id, b.txn_id]
+
+
+def test_seq_is_recovered_from_the_id_when_position_in_group_does_not_match():
+    # 同一份帳單分兩批寫進 CSV、或同封信的前面幾筆被對帳合併掉：這列在群組內的位置是 0，
+    # 但 id 其實是用 seq=5 算的。id 是現行公式的雜湊，直接試出 seq 比用位置猜可靠。
+    row = _txn("A", seq="5")                 # id 由 seq=5 算出
+    row = Transaction(**{**row.__dict__, "seq": ""})   # 模擬 CSV 沒存 seq
+    plan = plan_migration([row])
+    assert plan.unexplained == []
+    assert plan.changed == 0
+    assert plan.txns[0].txn_id == row.txn_id
+    assert plan.txns[0].seq == "5"
+
+
+def test_row_whose_id_matches_no_known_formula_stays_unexplained():
+    bogus = _txn("A", txn_id="deadbeefdeadbeef")
+    plan = plan_migration([bogus])
+    assert plan.unexplained == [bogus]
