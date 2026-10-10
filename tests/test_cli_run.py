@@ -10,9 +10,11 @@ def test_main_run_invokes_pipeline_and_returns_zero(monkeypatch, tmp_path, capsy
 
     captured = {}
 
-    def fake_run(service, cfg_arg, imported_at, query=None, on_progress=None):
+    def fake_run(service, cfg_arg, imported_at, query=None, on_progress=None,
+                force_refetch=False):
         captured["imported_at"] = imported_at
         captured["query"] = query
+        captured["force_refetch"] = force_refetch
         return RunResult(fetched=2, matched=1, added=1, skipped=0,
                          needs_parser=["x@unknown.test | 帳單"])
 

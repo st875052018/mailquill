@@ -64,6 +64,28 @@ def test_main_rebuild_subcommand(tmp_path):
     assert read_transactions(csv_path)[0].category_l1 == "Food"
 
 
+def test_main_reconcile_subcommand(tmp_path):
+    from mailquill.schema import Transaction, make_txn_id
+    csv_path = str(tmp_path / "t.csv")
+    db_path = str(tmp_path / "t.db")
+    email_txn = _txn("")  # 每日通知：商店名稱空白，account_last4=1234, date=2026-06-01, amount=100.00
+    pdf_txn = Transaction(
+        txn_id=make_txn_id("Cathay", "1234", "2026-06-01", "100.00", "全聯福利中心"),
+        date="2026-06-01", post_date="", amount="100.00", currency="TWD",
+        merchant_raw="全聯福利中心", merchant_norm="全聯福利中心",
+        category_l1="Uncategorized", category_l2="", bank="Cathay", account_last4="1234",
+        source_type="pdf", source_msg_id="stmt1", raw_ref="",
+        imported_at="2026-06-24T00:00:00",
+    )
+    append_transactions(csv_path, [email_txn, pdf_txn])
+
+    rc = main(["reconcile", "--csv", csv_path, "--db", db_path])
+    assert rc == 0
+    rows = read_transactions(csv_path)
+    assert len(rows) == 1
+    assert rows[0].merchant_raw == "全聯福利中心"
+
+
 def test_rebuild_atomic_rewrite_failure_leaves_csv_intact(tmp_path, monkeypatch):
     """
     Regression guard: if rebuild() fails during categorization OR during the
@@ -85,8 +107,8 @@ def test_rebuild_atomic_rewrite_failure_leaves_csv_intact(tmp_path, monkeypatch)
         return [f for f in os.listdir(str(tmp_path)) if f.endswith(".tmp")]
 
     # --- sub-case (a): failure before CSV is touched ---
-    import mailquill.cli as cli_mod
-    monkeypatch.setattr(cli_mod, "apply_categories", lambda t, rules: (_ for _ in ()).throw(RuntimeError("boom")))
+    import mailquill.store as store_mod
+    monkeypatch.setattr(store_mod, "apply_categories", lambda t, rules: (_ for _ in ()).throw(RuntimeError("boom")))
 
     with pytest.raises(RuntimeError, match="boom"):
         rebuild(csv_path, db_path, _rules_file(tmp_path))

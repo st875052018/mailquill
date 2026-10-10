@@ -2,49 +2,33 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import os
 import re
 import shutil
 import sys
-import tempfile
 from datetime import datetime
 
-from mailquill.categorizer import apply_categories, load_categories
-from mailquill.schema import FIELDS
-from mailquill.store import count_legacy_id_rows, read_transactions, rebuild_sqlite
+from mailquill.categorizer import load_categories, upsert_rules
+from mailquill.store import (
+    count_legacy_id_rows, read_transactions, rebuild, rebuild_sqlite, reconcile,
+    write_transactions_atomic,
+)
+from mailquill.bills_store import read_bills
+from mailquill.status import bank_statuses, format_status
 from mailquill.config import Config, load_config
 from mailquill.bootstrap import bootstrap_rules
 from mailquill.gmail_client import build_service, list_all_labels, gmail_after_query
 from mailquill.rules import save_rules
 from mailquill.pipeline import run_pipeline
-from mailquill.ingest import ingest_paths
+from mailquill.ingest import ingest_paths, collect_csvs
 from mailquill.migrate import plan_migration
+from mailquill.amex_autocat import generate_rules
+from mailquill.cathay_autocat import (
+    fetch_merchant_categories, generate_rules as cathay_generate_rules,
+)
 from mailquill.report import generate_report
-
-
-def _write_csv_atomic(csv_path: str, txns) -> None:
-    dir_ = os.path.dirname(os.path.abspath(csv_path))
-    fd, tmp = tempfile.mkstemp(dir=dir_, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=FIELDS)
-            writer.writeheader()
-            for t in txns:
-                writer.writerow(t.to_row())
-        os.replace(tmp, csv_path)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        raise
-
-
-def rebuild(csv_path: str, db_path: str, categories_path: str) -> int:
-    rules = load_categories(categories_path)
-    txns = [apply_categories(t, rules) for t in read_transactions(csv_path)]
-    _write_csv_atomic(csv_path, txns)
-    rebuild_sqlite(csv_path, db_path)
-    return len(txns)
+from mailquill.webapp import run_server
+from mailquill.sheets_client import build_service as build_sheets_service
+from mailquill.sheets_sync import sync_sheets
 
 
 def _progress(label: str):
@@ -128,10 +112,84 @@ def _migrate_ids(cfg_path: str, apply: bool) -> int:
 
     backup = f"{cfg.csv_path}.bak-{datetime.now().strftime('%Y%m%d%H%M%S')}"
     shutil.copy2(cfg.csv_path, backup)
-    _write_csv_atomic(cfg.csv_path, plan.txns)
+    write_transactions_atomic(cfg.csv_path, plan.txns)
     n = rebuild_sqlite(cfg.csv_path, cfg.db_path)
     print(f"  已遷移：備份 -> {backup}；重建 SQLite {n} 列 -> {cfg.db_path}")
     return 0
+
+
+def _print_items(title: str, items: list, note: str = "") -> None:
+    if not items:
+        return
+    print(f"{title}（{len(items)}{note}）：")
+    for item in items:
+        print(f"  - {item}")
+
+
+def _write_new_rules(new_rules: list, categories_path: str, dry_run: bool) -> None:
+    """列出 autocat 產生的新規則；dry_run 只印不寫，否則 upsert 進 categories.yaml。"""
+    for r in new_rules:
+        print(f"  {r.keyword} -> {r.l1}/{r.l2}")
+    if dry_run:
+        print("dry-run：未寫入，未實際套用")
+    elif new_rules:
+        upsert_rules(categories_path, new_rules)
+
+
+def _do_cathay_autocat(cfg, service, since: str | None, categories_path: str,
+                       dry_run: bool = False) -> int:
+    """掃每日通知信、依國泰自帶的消費類別產生新規則並附加進
+    `categories_path`（dry_run 時只印出不寫入）。回傳新增規則數，供呼叫端
+    決定要不要接著 rebuild 套用。
+    """
+    print("cathay-autocat: 掃描每日通知信中…")
+    merchant_categories = fetch_merchant_categories(
+        service, cfg.label_names(), query=gmail_after_query(since))
+    existing_rules = load_categories(categories_path)
+    new_rules = cathay_generate_rules(merchant_categories, existing_rules)
+    print(f"cathay-autocat: 範圍={since or '全部歷史'} "
+          f"掃到商家數={len(merchant_categories)} 新規則={len(new_rules)}")
+    _write_new_rules(new_rules, categories_path, dry_run)
+    return len(new_rules)
+
+
+def _do_run(cfg, service, args):
+    """執行 run 主流程（抓信→解析→分類→寫檔）並列印統計與各類警告，回傳 RunResult。"""
+    imported_at = datetime.now().isoformat(timespec="seconds")
+    since = _resolve_since(args)
+    r = run_pipeline(service, cfg, imported_at, query=gmail_after_query(since),
+                     on_progress=_progress("處理信件"), force_refetch=args.refetch)
+    print(f"run: 範圍={since or '全部歷史'} fetched={r.fetched} "
+          f"matched={r.matched} already_seen={r.already_seen} "
+          f"added={r.added} skipped={r.skipped}")
+    if r.missing_labels:
+        print(f"找不到 Gmail Label（{len(r.missing_labels)}）：{', '.join(r.missing_labels)}")
+    _print_items("待補 parser", r.needs_parser)
+    _print_items("PDF 解密失敗", r.unlock_failures)
+    _print_items("解析警告", r.parse_warnings)
+    _print_items("抓取失敗", r.fetch_failures, note="，已跳過，重跑可補回")
+    return r
+
+
+def _do_reconcile(csv_path: str, db_path: str):
+    print("reconcile: 合併每日通知與月結單重複交易中…")
+    r = reconcile(csv_path, db_path)
+    print(f"reconcile: merged={r.merged} ambiguous={r.ambiguous} voided={r.voided}")
+    return r
+
+
+def _do_sync_sheets(cfg):
+    service = build_sheets_service(cfg.credentials_path, cfg.token_path)
+    print("sync-sheets: 同步中…")
+    r = sync_sheets(cfg.csv_path, cfg.sheets_state_path, service, aliases=cfg.account_aliases,
+                    goal_monthly_income=cfg.goal_monthly_income, bills_path=cfg.bills_path)
+    if r.created:
+        print(f"sync-sheets: 已建立新試算表 -> {r.spreadsheet_url}")
+    else:
+        print(f"sync-sheets: 已覆寫 -> {r.spreadsheet_url}")
+    print(f"sync-sheets: rows={r.rows} archived_rows={r.archived_rows} "
+          f"accounts={len(r.accounts)} budget_month={r.budget_month}")
+    return r
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,6 +207,14 @@ def main(argv: list[str] | None = None) -> int:
     p_rebuild.add_argument("--categories", default=None,
                            help="預設取 config.yaml 的 categories_path")
 
+    p_reconcile = sub.add_parser(
+        "reconcile",
+        help="合併每日通知（email_body）與月結單（pdf）對同一筆消費的重複記錄，"
+             "並清掉從未真正請款的幽靈通知"
+    )
+    p_reconcile.add_argument("--csv", default="transactions.csv")
+    p_reconcile.add_argument("--db", default="mailquill.db")
+
     p_labels = sub.add_parser(
         "labels", help="列出 Gmail 內所有 Label 的確切名稱（除錯／設定用）"
     )
@@ -164,15 +230,64 @@ def main(argv: list[str] | None = None) -> int:
         "run", help="抓取財務信件、解析、分類並更新 CSV/SQLite"
     )
     p_run.add_argument("--config", default="config.yaml")
+    p_run.add_argument("--cathay-autocat", action="store_true",
+                       help="完成後接著執行 cathay-autocat 補規則、有新規則就自動 rebuild")
+    p_run.add_argument("--sync-sheets", action="store_true",
+                       help="完成後接著執行 sync-sheets，一次抓信+同步 Google Sheet")
+    p_run.add_argument("--refetch", action="store_true",
+                       help="CSV 裡已有交易的信也強制重抓/重解析（改過 parser 想讓舊信重跑時用），"
+                            "預設會跳過已入帳的信以節省 API/CPU")
     _add_date_args(p_run)
 
-    p_ingest = sub.add_parser(
-        "ingest", help="從本地 PDF 檔/資料夾匯入帳單（如富邦需手動下載者）"
+    p_update = sub.add_parser(
+        "update",
+        help="每月一鍵更新：抓信 → 合併重複 → 同步 Google Sheet（等於 run + reconcile + sync-sheets）"
     )
-    p_ingest.add_argument("paths", nargs="+", help="PDF 檔或含 PDF 的資料夾")
+    p_update.add_argument("--config", default="config.yaml")
+    p_update.add_argument("--refetch", action="store_true",
+                          help="已入帳的信也強制重抓/重解析（改過 parser 想讓舊信重跑時用）")
+    _add_date_args(p_update)
+
+    p_status = sub.add_parser(
+        "status", help="各銀行最新帳單／交易同步到哪裡，檢查有沒有漏抓最新帳單（只讀本地資料）")
+    p_status.add_argument("--config", default="config.yaml")
+    p_status.add_argument("--csv", help="預設讀 config 的 csv_path")
+    p_status.add_argument("--bills", help="預設讀 config 的 bills_path")
+    p_status.add_argument("--today", help="YYYY-MM-DD，預設今天（測試用）")
+
+    p_ingest = sub.add_parser(
+        "ingest",
+        help="從本地 PDF/CSV 檔或資料夾匯入帳單（如富邦需手動下載 PDF、"
+             "Amex 只能匯出 CSV 者）",
+    )
+    p_ingest.add_argument("paths", nargs="+",
+                          help="PDF/CSV 檔或含 PDF/CSV 的資料夾")
     p_ingest.add_argument("--config", default="config.yaml")
     p_ingest.add_argument("--bank", default=None,
-                          help="指定銀行 parser（如 fubon）；不給則依內容自動判斷")
+                          help="指定銀行 parser（如 fubon）；只影響 PDF，"
+                               "不給則依內容自動判斷。CSV 目前固定用 Amex 格式")
+
+    p_amex_autocat = sub.add_parser(
+        "amex-autocat",
+        help="依 Amex CSV 的 Category 欄位自動產生 categories.yaml 規則"
+             "（給大量一次性美國商家用，避免逐筆手寫關鍵字）",
+    )
+    p_amex_autocat.add_argument("paths", nargs="+",
+                                help="Amex CSV 檔或含 CSV 的資料夾")
+    p_amex_autocat.add_argument("--categories", default="categories.yaml")
+    p_amex_autocat.add_argument("--dry-run", action="store_true",
+                                help="只預覽將新增的規則，不寫入 categories.yaml")
+
+    p_cathay_autocat = sub.add_parser(
+        "cathay-autocat",
+        help="依國泰每日通知信自帶的消費類別自動產生 categories.yaml 規則"
+             "（重新掃 Gmail 上的通知信，不影響已存的交易資料）",
+    )
+    p_cathay_autocat.add_argument("--config", default="config.yaml")
+    p_cathay_autocat.add_argument("--categories", default="categories.yaml")
+    p_cathay_autocat.add_argument("--dry-run", action="store_true",
+                                  help="只預覽將新增的規則，不寫入 categories.yaml")
+    _add_date_args(p_cathay_autocat)
 
     p_migrate = sub.add_parser(
         "migrate-ids", help="把舊式 txn_id 重算成現行公式並移除因此重複的列"
@@ -187,6 +302,19 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("--config", default="config.yaml")
     p_report.add_argument("--out", default="report.html")
 
+    p_serve = sub.add_parser(
+        "serve", help="啟動本地可編輯的網頁 dashboard（編輯分類、手動記帳、長期趨勢）"
+    )
+    p_serve.add_argument("--config", default="config.yaml")
+    p_serve.add_argument("--port", type=int, default=8420)
+
+    p_sync_sheets = sub.add_parser(
+        "sync-sheets",
+        help="把 CSV 整份鏡像到 Google Sheet（手機用 Sheets App 檢視，"
+             "會把資料寫進 Google 雲端，非本機處理）",
+    )
+    p_sync_sheets.add_argument("--config", default="config.yaml")
+
     args = parser.parse_args(argv)
     if args.command == "rebuild":
         cfg = _config_or_defaults(args.config)
@@ -197,6 +325,9 @@ def main(argv: list[str] | None = None) -> int:
               f"（csv={csv_path} db={db_path} categories={categories_path}）")
         n = rebuild(csv_path, db_path, categories_path)
         print(f"rebuilt {n} transactions -> {db_path}")
+        return 0
+    if args.command == "reconcile":
+        _do_reconcile(args.csv, args.db)
         return 0
     if args.command == "labels":
         cfg = load_config(args.config)
@@ -225,30 +356,34 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config(args.config)
         _warn_legacy_ids(cfg.csv_path)
         service = build_service(cfg.credentials_path, cfg.token_path)
-        imported_at = datetime.now().isoformat(timespec="seconds")
+        r = _do_run(cfg, service, args)
         since = _resolve_since(args)
-        r = run_pipeline(service, cfg, imported_at, query=gmail_after_query(since),
-                         on_progress=_progress("處理信件"))
-        print(f"run: 範圍={since or '全部歷史'} fetched={r.fetched} "
-              f"matched={r.matched} added={r.added} skipped={r.skipped}")
-        if r.missing_labels:
-            print(f"找不到 Gmail Label（{len(r.missing_labels)}）：{', '.join(r.missing_labels)}")
-        if r.needs_parser:
-            print(f"待補 parser（{len(r.needs_parser)}）：")
-            for item in r.needs_parser:
-                print(f"  - {item}")
-        if r.unlock_failures:
-            print(f"PDF 解密失敗（{len(r.unlock_failures)}）：")
-            for item in r.unlock_failures:
-                print(f"  - {item}")
-        if r.parse_warnings:
-            print(f"解析警告（{len(r.parse_warnings)}）：")
-            for item in r.parse_warnings:
-                print(f"  - {item}")
-        if r.fetch_failures:
-            print(f"抓取失敗（{len(r.fetch_failures)}，已跳過，重跑可補回）：")
-            for item in r.fetch_failures:
-                print(f"  - {item}")
+        if args.cathay_autocat:
+            n = _do_cathay_autocat(cfg, service, since, cfg.categories_path)
+            if n:
+                print("cathay-autocat: 新規則已寫入，重新套用分類中…")
+                rebuild(cfg.csv_path, cfg.db_path, cfg.categories_path)
+        if args.sync_sheets:
+            _do_sync_sheets(cfg)
+        return 0
+    if args.command == "update":
+        cfg = load_config(args.config)
+        service = build_service(cfg.credentials_path, cfg.token_path)
+        run_r = _do_run(cfg, service, args)
+        rec_r = _do_reconcile(cfg.csv_path, cfg.db_path)
+        sync_r = _do_sync_sheets(cfg)
+        print(f"update 完成：新增 {run_r.added} 筆，合併 {rec_r.merged} 筆，"
+              f"Sheet 已更新 -> {sync_r.spreadsheet_url}")
+        return 0
+    if args.command == "status":
+        if args.csv and args.bills:
+            csv_path, bills_path = args.csv, args.bills
+        else:
+            cfg = load_config(args.config)
+            csv_path, bills_path = args.csv or cfg.csv_path, args.bills or cfg.bills_path
+        today = args.today or datetime.now().strftime("%Y-%m-%d")
+        statuses = bank_statuses(read_transactions(csv_path), read_bills(bills_path), today)
+        print(format_status(statuses, today))
         return 0
     if args.command == "ingest":
         cfg = load_config(args.config)
@@ -258,18 +393,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ingest: files={r.files} added={r.added} skipped={r.skipped}")
         for line in r.parsed:
             print(f"  {line}")
-        if r.needs_parser:
-            print(f"無對應 parser（{len(r.needs_parser)}）：")
-            for item in r.needs_parser:
-                print(f"  - {item}")
-        if r.unlock_failures:
-            print(f"解密失敗（{len(r.unlock_failures)}）：")
-            for item in r.unlock_failures:
-                print(f"  - {item}")
-        if r.parse_warnings:
-            print(f"解析警告（{len(r.parse_warnings)}）：")
-            for item in r.parse_warnings:
-                print(f"  - {item}")
+        _print_items("無對應 parser", r.needs_parser)
+        _print_items("解密失敗", r.unlock_failures)
+        _print_items("解析警告", r.parse_warnings)
+        return 0
+    if args.command == "amex-autocat":
+        csvs = collect_csvs(args.paths)
+        existing_rules = load_categories(args.categories)
+        new_rules = generate_rules(csvs, existing_rules)
+        print(f"amex-autocat: files={len(csvs)} 新規則={len(new_rules)}")
+        _write_new_rules(new_rules, args.categories, args.dry_run)
+        if new_rules and not args.dry_run:
+            print(f"已附加進 {args.categories}，接著跑 mailquill rebuild 套用")
+        return 0
+    if args.command == "cathay-autocat":
+        cfg = load_config(args.config)
+        service = build_service(cfg.credentials_path, cfg.token_path)
+        since = _resolve_since(args)
+        n = _do_cathay_autocat(cfg, service, since, args.categories, dry_run=args.dry_run)
+        if n and not args.dry_run:
+            print(f"已附加進 {args.categories}，接著跑 mailquill rebuild 套用")
         return 0
     if args.command == "migrate-ids":
         return _migrate_ids(cfg_path=args.config, apply=args.apply)
@@ -278,6 +421,16 @@ def main(argv: list[str] | None = None) -> int:
         print("report: 由 SQLite 產生 HTML 報表中…")
         out = generate_report(cfg.db_path, args.out)
         print(f"report: 已產生 {out}")
+        return 0
+    if args.command == "serve":
+        cfg = load_config(args.config)
+        url = f"http://127.0.0.1:{args.port}"
+        print(f"serve: 啟動中 -> {url}（Ctrl+C 結束）")
+        run_server(cfg, port=args.port)
+        return 0
+    if args.command == "sync-sheets":
+        cfg = load_config(args.config)
+        _do_sync_sheets(cfg)
         return 0
     return 1
 
