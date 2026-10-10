@@ -55,6 +55,9 @@ source .venv/bin/activate          # 之後所有指令都在這個 venv 裡跑
 pip install -e .                   # 安裝
 pip install -e ".[dev]"            # 含測試相依(選用)
 
+# HSBC 帳單商家名稱是內嵌圖片、需 OCR 才能解析，額外裝系統 tesseract：
+brew install tesseract tesseract-lang         # macOS；只用不到 HSBC 可略過
+
 # 1) 設定 Google OAuth、config.yaml、passwords.txt（見 docs/SETUP.md）
 # 2) 從既有 Gmail Label 產生抓取規則草稿，檢查後即可
 mailquill bootstrap
@@ -68,6 +71,26 @@ mailquill report        # → report.html，用瀏覽器打開
 
 > 完整的 Google Cloud OAuth 申請、設定檔與密碼清單步驟，請見 **[設定指南 · docs/SETUP.md](docs/SETUP.md)**。
 > `mailquill` 與 `python -m mailquill.cli` 等價。
+
+---
+
+## 📅 每月例行：一個指令就好
+
+```bash
+mailquill update
+```
+
+它會依序做三件事，**其他子指令平常都不用記**：
+
+1. `run` — 抓 Gmail 新信件 → 解析 → 分類 → 更新 CSV / SQLite
+2. `reconcile` — 合併每日通知與月結單對同一筆消費的重複記錄
+3. `sync-sheets` — 把結果推上 Google Sheet（手機用 Sheets App 看）
+
+跑完會印一行總結（新增幾筆、合併幾筆、Sheet 網址）。中間若出現「待補 parser / 解析警告 / 抓取失敗」，處理完再跑一次即可，已入帳的信不會重複。
+
+需要手動下載帳單的銀行（富邦 PDF、Amex CSV）例外：先 `mailquill ingest <檔案>` 匯入，再跑一次 `mailquill update` 同步上去。
+
+想確認每家銀行的最新帳單有沒有都進來，跑 `mailquill status`（只讀本地資料、不連 Gmail）：列出各銀行最新帳單月份、月結單交易／每日通知各到哪一天，落後的會標 ⚠️／❌。
 
 ---
 
@@ -207,6 +230,7 @@ mailquill rebuild --db /tmp/scratch.db
 | 台新 Taishin / Richart | `taishin` | Gmail 內文／附件 | ✅ |
 | 玉山銀行 E.SUN | `esun` | Gmail 附件 PDF | ✅ |
 | 永豐銀行 SinoPac | `sinopac` | Gmail 附件 PDF | ✅ |
+| 滙豐(台灣) HSBC | `hsbc` | Gmail 附件 PDF（商家名稱靠 OCR，需系統裝 tesseract） | ✅ |
 | 富邦銀行 Fubon | `fubon` | ⚠️ 需手動下載 PDF | ✅ parser 就緒 |
 
 ### ⚠️ 富邦：目前需手動下載後本地解析
@@ -248,11 +272,41 @@ mailquill ingest --bank fubon ~/Downloads/fubon/  # 整個資料夾
 
 ---
 
+## 📱 手機檢視：同步到 Google Sheet（選用，非本機）
+
+想在手機上用 Sheets App 隨手看，可以把 CSV 整份鏡像到一份 Google Sheet：
+
+```bash
+mailquill sync-sheets
+```
+
+第一次執行會自動建立一份新試算表，把網址存進本地 `sheets_state.json`（已列入 `.gitignore`）並印出來；之後每次執行都整份清空重寫同一份試算表（Sheet 只是唯讀鏡像，CSV 仍是唯一真實來源）。每次同步都會產生：
+
+分頁由左到右依序是 `總覽`、`預算`、`明細查詢`、`交易`，以及預設隱藏的 `歸檔`（舊版的英文分頁名稱會在同步時原地改名，預算裡填的數字不會消失）：
+
+- `總覽`：單一分頁，依幣別各疊一段「月份 x 帳戶」加總矩陣（中間空一列隔開，如 `月份 (TWD)`、`月份 (USD)`），含月合計與帳戶合計，一眼看出這個月每張卡大概要繳多少；只含 2026 年起的月份，跟 `交易` 一致（更舊的月度總覽不重複列出）。刻意仍按幣別分段、不把數字加在一起——不同幣別不能直接相加，但放同一個分頁方便手機上不用切分頁就能都看到。矩陣最下面（隔一空列）會疊一段「本期應繳」小表，列出有支援的銀行（目前只有 HSBC）最新一期的應繳總額/最低應繳，讀獨立的 `bills.csv`（見下方「帳單應繳金額」）；沒有這類資料就不出現。
+- `預算`：分類／月預算／近3月平均／實際／差異五欄合一（預算、近3月平均參考、跟實際花費的比對都在同一張表，不用切分頁對照）。分類清單＋空白的月預算欄只在第一次執行時建立，之後每次同步都**不會**再清空重寫——自己在 Sheets App 上填每個分類的月預算即可，填的數字永遠不會被洗掉；近3月平均/實際/差異則每次同步都重新算重新寫，讀「近期資料裡最新一個月」的實際分類花費跟預算比對，差異＝實際－預算（正值代表超支，標紅字；負值代表省下，標綠字）。只取一種幣別（近期交易筆數最多的那個）。
+- `明細查詢`：上方兩個下拉選單——月份、帳戶（都可選「全部」），下面即時列出符合的交易；帳戶名稱套用 `config.yaml` 的 `account_aliases`。原本每個帳戶各開一個分頁，內容跟交易總表重複，改成在這裡用選單篩。
+- `交易`：2026 年起（含）的交易合併總表，最後一欄 `account` 是帳戶名稱，可直接用表頭篩選器篩。
+- `歸檔`（預設隱藏）：2026 年以前的所有交易，欄位跟 `交易` 一樣；需要時從「檢視 > 隱藏的工作表」叫出來。
+
+> 2026 這個斷點目前寫死在 `mailquill/sheets_sync.py` 的 `ARCHIVE_CUTOFF`，要調整（例如往後留兩年）改那一行常數即可。
+
+新增卡片/新月份/新幣別時，下拉選單（或總覽裡的段落）會自動補上；改版前殘留的舊分頁（如曾經拆開的 `Overview-TWD`、以前的各帳戶分頁）會被刪除；其餘沿用同一個 sheetId，不會整份重建。
+
+> ⚠️ **這個功能會把交易資料寫進 Google 雲端**，跟本專案其餘功能「純本地」不同——請自行評估是否要用。它跟 Gmail 抓信共用同一份 OAuth token（`token_path`），需要 `spreadsheets` 這個額外 scope；若 `token.json` 是舊版只授權過 Gmail，刪掉它讓下次執行任一指令重新走一次授權（會一次跳出兩個權限請求）即可。
+
+### 帳單應繳金額
+
+逐筆消費（`transactions.csv`）之外，`mailquill run` 也會順便把信件裡帳單本身的「應繳總額」/「最低應繳」抓出來，寫進獨立的 `bills_path`（預設 `bills.csv`，已列入 `.gitignore`）——一筆代表一家銀行某個帳單月份，同一期重跑會用新值蓋掉舊值。目前只有 HSBC 支援：滙豐電子帳單信會附帶兩個超商繳費條碼 HTML（`eBarCodeFullPay.html`/`eBarCodeMinPay.html`），格式固定的純文字，比 PDF 彙總頁（中文標籤是內嵌小圖，OCR 不到）可靠。`sync-sheets` 會把每家銀行最新一期的應繳金額顯示在 `Overview` 分頁矩陣最下面。已經在 `transactions.csv` 裡的舊 HSBC 帳單信不會自動補抓這筆——需要 `mailquill run --refetch` 讓舊信重跑一次 parser。
+
+---
+
 ## 🔐 隱私與安全
 
-- 所有處理都在本機；唯一的網路存取是 Gmail **唯讀** API。
+- 核心處理（`run`/`ingest`/`rebuild`/`report`/`serve`）都在本機；唯一的網路存取是 Gmail **唯讀** API。`sync-sheets` 是唯一例外，見上一節。
 - 這些檔案 **永不進 git**（已列入 `.gitignore`）：
-  `credentials.json`、`token.json`、`passwords.txt`、`config.yaml`、`rules.yaml`、`transactions.csv`、`*.db`、`report.html`、`*.pdf`、`raw/`。
+  `credentials.json`、`token.json`、`passwords.txt`、`config.yaml`、`rules.yaml`、`transactions.csv`、`*.db`、`report.html`、`*.pdf`、`raw/`、`sheets_state.json`。
 - PDF 密碼放在本地 `passwords.txt`，不要貼到任何地方。
 
 ---
