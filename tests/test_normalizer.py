@@ -28,7 +28,7 @@ def test_normalize_builds_transaction():
     assert txn.amount == "1200"
     assert txn.merchant_raw == " PXMART "
     assert txn.merchant_norm == "PXMART"
-    assert txn.category_l1 == "未分類"
+    assert txn.category_l1 == "Uncategorized"
     assert txn.category_l2 == ""
     assert txn.bank == "ExampleBank"
     assert txn.account_last4 == "1234"

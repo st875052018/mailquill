@@ -29,7 +29,7 @@ def test_to_row_and_from_row_roundtrip():
     txn = Transaction(
         txn_id="abc", date="2026-06-01", post_date="2026-06-02",
         amount="1200.00", currency="TWD", merchant_raw="全聯",
-        merchant_norm="全聯福利中心", category_l1="食", category_l2="生活採買",
+        merchant_norm="全聯福利中心", category_l1="Food", category_l2="Groceries",
         bank="Cathay", account_last4="1234", source_type="email_body",
         source_msg_id="msg-1", raw_ref="raw/msg-1.html", imported_at="2026-06-24T10:00:00",
     )

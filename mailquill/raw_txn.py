@@ -13,3 +13,4 @@ class RawTxn:
     currency: str = "TWD"
     post_date: str = ""
     account_last4: str = ""
+    source_category: str = ""  # 來源自帶的分類（如 Amex CSV 的 Category），純暫存不落地

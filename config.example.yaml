@@ -13,4 +13,31 @@ rules_path: "rules.yaml"
 raw_dir: "raw"
 passwords_path: "passwords.txt"     # 每行一組 PDF 密碼，# 開頭為註解
 credentials_path: "credentials.json"  # Google Cloud OAuth client（自行下載）
-token_path: "token.json"              # 首次授權後自動產生
+token_path: "token.json"              # 首次授權後自動產生（sync-sheets 需要加 Sheets 權限，見 README）
+sheets_state_path: "sheets_state.json" # sync-sheets 存自動建立的試算表 ID/網址
+bills_path: "bills.csv"               # 帳單應繳總額/最低應繳（目前只有 HSBC 支援）
+seen_ids_path: "seen_msg_ids.txt"     # 已處理信件登記檔，避免 reconcile 併掉的重複被 run 重新加回
+
+# 選用：若房租/固定支出是用台北富邦網銀轉帳（非信用卡），可設定收款帳戶特徵，
+# 讓 mailquill 從富邦「臺幣轉帳交易成功通知」信自動記一筆（分類為 Housing/Rent，
+# 見 categories.yaml）。兩個片段都要出現在信件內文才算命中；不設定就不會解析
+# 任何轉帳信。片段可直接抄「轉入帳號」欄位裡的銀行代碼與帳號末四碼，例如：
+# fubon_rent_dest_signature:
+#   - "008(某銀行)"
+#   - "1234"
+
+# 選用：sync-sheets 帳戶名稱（交易分頁 account 欄、明細查詢帳戶選單、總覽矩陣欄位）的覆寫。key 為預設名稱
+# 「銀行-末四碼」（沒有末四碼的交易——如帳戶層級費用——key 是裸銀行名），
+# 可從總覽分頁目前的欄位名稱抄；沒列在這裡的帳戶
+# 仍用預設名稱。多個 key 指到同一個 alias 值會被當成同一個帳戶——例如同一
+# 家銀行的正卡/附卡末四碼很多、想合併成一個帳戶看時可以這樣用：
+# account_aliases:
+#   "Fubon-6040": "富邦帳戶"
+#   "Fubon-7254": "富邦JCB卡"
+#   "CTBC-9646": "CTBC信用卡"
+#   "CTBC-7428": "CTBC信用卡"
+
+# 選用：Budget 分頁「五大目標」區塊拿來算目標金額的月收入。刻意只放在本地
+# config（不進 git、不同步進 Google Sheet）——收入數字不會出現在 Sheet 上，
+# 只有目標金額/實際/差異看得到。沒設定就用預設值 100000。
+# goal_monthly_income: 100000

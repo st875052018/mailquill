@@ -6,15 +6,21 @@ passwords.txt
 *.secret.yaml
 config.yaml
 rules.yaml
+firefly_token.txt
+firefly_accounts.yaml
 
 # local data (source of truth lives locally, not in git)
 *.db
 *.sqlite
 data/
 raw/
+manual_pdfs/
 transactions.csv
 transactions.csv.bak-*
+bills.csv
 report.html
+sheets_state.json
+seen_msg_ids.txt
 *.log
 
 # python
