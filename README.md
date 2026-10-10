@@ -77,7 +77,7 @@ mailquill report        # → report.html，用瀏覽器打開
 ## 📅 每月例行：一個指令就好
 
 ```bash
-mailquill update
+./update.sh          # 不用啟用 venv、在哪個目錄都能跑；等同 mailquill update
 ```
 
 它會依序做三件事，**其他子指令平常都不用記**：
@@ -86,7 +86,7 @@ mailquill update
 2. `reconcile` — 合併每日通知與月結單對同一筆消費的重複記錄
 3. `sync-sheets` — 把結果推上 Google Sheet（手機用 Sheets App 看）
 
-跑完會印一行總結（新增幾筆、合併幾筆、Sheet 網址）。中間若出現「待補 parser / 解析警告 / 抓取失敗」，處理完再跑一次即可，已入帳的信不會重複。
+跑完會印一行總結（新增幾筆、合併幾筆、Sheet 網址），接著附上各銀行同步狀態（同 `mailquill status`），哪家漏抓一眼就看得到。中間若出現「待補 parser / 解析警告 / 抓取失敗」，處理完再跑一次即可，已入帳的信不會重複。
 
 需要手動下載帳單的銀行（富邦 PDF、Amex CSV）例外：先 `mailquill ingest <檔案>` 匯入，再跑一次 `mailquill update` 同步上去。
 

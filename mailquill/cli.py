@@ -192,6 +192,12 @@ def _do_sync_sheets(cfg):
     return r
 
 
+def _status_text(csv_path: str, bills_path: str, today: str | None) -> str:
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    statuses = bank_statuses(read_transactions(csv_path), read_bills(bills_path), today)
+    return format_status(statuses, today)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mailquill")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -374,6 +380,7 @@ def main(argv: list[str] | None = None) -> int:
         sync_r = _do_sync_sheets(cfg)
         print(f"update 完成：新增 {run_r.added} 筆，合併 {rec_r.merged} 筆，"
               f"Sheet 已更新 -> {sync_r.spreadsheet_url}")
+        print(_status_text(cfg.csv_path, cfg.bills_path, None))   # 順便看有沒有銀行漏抓
         return 0
     if args.command == "status":
         if args.csv and args.bills:
@@ -381,9 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             cfg = load_config(args.config)
             csv_path, bills_path = args.csv or cfg.csv_path, args.bills or cfg.bills_path
-        today = args.today or datetime.now().strftime("%Y-%m-%d")
-        statuses = bank_statuses(read_transactions(csv_path), read_bills(bills_path), today)
-        print(format_status(statuses, today))
+        print(_status_text(csv_path, bills_path, args.today))
         return 0
     if args.command == "ingest":
         cfg = load_config(args.config)

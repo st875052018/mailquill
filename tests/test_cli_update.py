@@ -53,3 +53,15 @@ def test_update_passes_since_to_pipeline(monkeypatch, tmp_path):
     cli.main(["update", "--config", str(tmp_path / "config.yaml"), "--since", "2026-09-01"])
 
     assert "2026/09/01" in captured["query"]
+
+
+def test_update_ends_with_bank_status_so_missing_banks_are_visible(monkeypatch, tmp_path, capsys):
+    calls, captured = [], {}
+    cfg = _setup(monkeypatch, calls, captured)
+    cfg.csv_path = str(tmp_path / "t.csv")
+    cfg.bills_path = str(tmp_path / "b.csv")
+
+    cli.main(["update", "--config", str(tmp_path / "config.yaml")])
+
+    out = capsys.readouterr().out
+    assert out.index("update 完成") < out.index("同步狀態")
