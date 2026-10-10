@@ -294,3 +294,64 @@ def test_ingest_pdf_ocr_failure_is_reported_not_raised(monkeypatch, tmp_path):
 
     assert r.added == 0
     assert any("tesseract missing" in w for w in r.parse_warnings)
+
+
+def test_ingest_two_overlapping_csvs_in_one_call_count_occurrences_per_file(tmp_path):
+    # seq 是「單一檔案內第幾次出現」；兩個檔案各有一筆同樣的消費是同一筆，
+    # 不能因為合併計數而被當成同日第二筆。
+    cfg = _cfg(tmp_path)
+    a = tmp_path / "a.csv"
+    b = tmp_path / "b.csv"
+    for f in (a, b):
+        f.write_text(_AMEX_HEADER + _amex_row("06/20/2026", "SHOP A", "10.00"),
+                     encoding="utf-8")
+    r = ingest_paths([str(a), str(b)], cfg, "2026-07-01T10:00:00")
+    assert r.added == 1 and r.skipped == 1
+
+
+def test_ingest_pdf_one_failing_ocr_candidate_does_not_block_the_next(monkeypatch, tmp_path):
+    import mailquill.ingest as ingest_mod
+    bad_cls = _ocr_parser_cls()
+
+    def boom(self, pdf_bytes):
+        raise RuntimeError("tesseract missing")
+    bad_cls.extract_pdf_text = boom
+    bad_cls.bank = "BadBank"
+    monkeypatch.setattr(ingest_mod, "all_parsers",
+                        lambda: [bad_cls(), _ocr_parser_cls()()])
+    pdf = tmp_path / "ocr.pdf"
+    pdf.write_bytes(_encrypted_pdf(["plain"], "PW1"))
+    cfg = _cfg(tmp_path)
+
+    r = ingest_paths([str(pdf)], cfg, "2026-06-25T10:00:00")
+
+    assert r.added == 1
+    assert r.parse_warnings == []
+
+
+def test_ingest_bank_filter_also_applies_to_csv(tmp_path):
+    cfg = _cfg(tmp_path)
+    f = tmp_path / "amex.csv"
+    f.write_text(_AMEX_HEADER + _amex_row("06/20/2026", "SHOP A", "10.00"),
+                 encoding="utf-8")
+    r = ingest_paths([str(f)], cfg, "2026-07-01T10:00:00", bank="ctbc")
+    assert r.added == 0
+    assert any("amex.csv" in w for w in r.parse_warnings)
+
+
+def test_ingest_parse_bill_failure_does_not_abort_the_batch(monkeypatch, tmp_path):
+    import mailquill.ingest as ingest_mod
+    cls = _ocr_parser_cls()
+
+    def boom(self, msg, pdf_texts):
+        raise ValueError("bad bill")
+    cls.parse_bill = boom
+    monkeypatch.setattr(ingest_mod, "all_parsers", lambda: [cls()])
+    pdf = tmp_path / "ocr.pdf"
+    pdf.write_bytes(_encrypted_pdf(["plain"], "PW1"))
+    cfg = _cfg(tmp_path)
+
+    r = ingest_paths([str(pdf)], cfg, "2026-06-25T10:00:00")
+
+    assert r.added == 1
+    assert any("bad bill" in w for w in r.parse_warnings)

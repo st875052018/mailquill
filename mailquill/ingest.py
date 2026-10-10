@@ -16,7 +16,6 @@ PDF 路徑額外呼叫 `parser.parse_bill`（跟 `run_pipeline` 一致，見
 from __future__ import annotations
 
 import os
-from collections import Counter
 from dataclasses import dataclass, field
 
 from mailquill.config import Config, load_passwords
@@ -29,9 +28,10 @@ from mailquill.ctbc_csv import BANK as CTBC_BANK, parse_ctbc_csv
 from mailquill.normalizer import normalize
 from mailquill.categorizer import load_categories, apply_categories
 from mailquill.merchant_names import aliases_path_for, apply_display_names, load_aliases
-from mailquill.store import append_transactions, rebuild_sqlite, rekey_csv_rows
+from mailquill.store import append_transactions, rebuild_sqlite, rekey_csv_rows, rekey_txns
 from mailquill.bills_store import append_bills
 from mailquill.gmail_message import EmailMessage
+from mailquill.raw_txn import RawTxn
 
 
 @dataclass
@@ -76,7 +76,7 @@ _CSV_FORMATS = (
 )
 
 
-def _load_csv_txns(raw_bytes: bytes) -> tuple[str, list]:
+def _load_csv_txns(raw_bytes: bytes) -> tuple[str, list[RawTxn]]:
     """依內容格式判斷 CSV 屬於哪家銀行的手動匯出，回傳 (bank名稱, RawTxn 清單)。
 
     都解不出交易時回 ("", [])。
@@ -93,17 +93,26 @@ def _load_csv_txns(raw_bytes: bytes) -> tuple[str, list]:
     return "", []
 
 
+def _blank_msg() -> EmailMessage:
+    return EmailMessage("", "", "", "", "", [])
+
+
+def _bank_matches(bank: str | None, name: str) -> bool:
+    """`--bank` 沒給＝全部符合；有給時做不分大小寫的子字串比對。"""
+    return not bank or bank.lower() in name.lower()
+
+
 def select_parser(text: str, bank: str | None = None):
     """依 PDF 文字內容挑 parser（無寄件者可比對時用）。
 
     對每個 parser 試解，取解析出最多筆者；bank 有給時只限該銀行的 parser。
     回傳 (parser, raw_txns)；都解不出回 (None, [])。
     """
-    msg = EmailMessage("", "", "", "", "", [])
+    msg = _blank_msg()
     best = None
     best_txns: list = []
     for parser in all_parsers():
-        if bank and bank.lower() not in parser.bank.lower():
+        if not _bank_matches(bank, parser.bank):
             continue
         try:
             txns = parser.parse(msg, [text])
@@ -125,26 +134,99 @@ def select_parser_for_pdf(pdf_bytes: bytes, bank: str | None = None):
     的商家欄是圖片，要 OCR）時，改用該 parser 自己的 `extract_pdf_text` 重
     解——跟 `run` 走同一條路，同一份帳單兩種匯入方式才會得到同樣的資料。
     OCR 比較慢，所以只對有覆寫的 parser 才跑。
+
+    某個候選的 OCR 失敗不會擋住其他候選；全部都沒解出交易、又有候選失敗時，
+    才把第一個錯誤丟出去讓呼叫端回報。
     """
     text = extract_pdf_text(pdf_bytes)
     parser, raws = select_parser(text, bank)
     if parser is not None and not _overrides_pdf_text(parser):
         return parser, raws, text
 
-    msg = EmailMessage("", "", "", "", "", [])
+    msg = _blank_msg()
     candidates = [parser] if parser is not None else [
         p for p in all_parsers()
-        if _overrides_pdf_text(p) and (not bank or bank.lower() in p.bank.lower())]
+        if _overrides_pdf_text(p) and _bank_matches(bank, p.bank)]
     best, best_raws, best_text = parser, raws, text
+    errors: list[Exception] = []
     for cand in candidates:
-        own_text = cand.extract_pdf_text(pdf_bytes)
         try:
+            own_text = cand.extract_pdf_text(pdf_bytes)
             cand_raws = cand.parse(msg, [own_text])
-        except Exception:
-            cand_raws = []
+        except Exception as e:
+            errors.append(e)
+            continue
         if len(cand_raws) > len(best_raws):
             best, best_raws, best_text = cand, cand_raws, own_text
+    if errors and not best_raws:
+        raise errors[0]
     return best, best_raws, best_text
+
+
+def _read_file(path: str, result: IngestResult) -> bytes | None:
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError as e:
+        result.unlock_failures.append(f"{os.path.basename(path)}: 讀檔失敗 {e}")
+        return None
+
+
+def _ingest_pdf(path: str, passwords, bank, imported_at, rules, result: IngestResult):
+    """回傳 (交易清單, 應繳資料或 None)；失敗已記進 result，回傳空清單。"""
+    name = os.path.basename(path)
+    raw = _read_file(path, result)
+    if raw is None:
+        return [], None
+    res = unlock_pdf(raw, passwords)
+    if not res.ok:
+        result.unlock_failures.append(f"{name}: {res.error}")
+        return [], None
+    try:
+        parser, raws, text = select_parser_for_pdf(res.data, bank)
+    except Exception as e:
+        result.parse_warnings.append(f"{name}: 文字抽取失敗 {e}")
+        return [], None
+    if not raws:
+        result.needs_parser.append(name)
+        return [], None
+    result.parsed.append(f"{name} -> {parser.bank} ({len(raws)}筆)")
+    txns = []
+    for seq, raw_txn in enumerate(raws):
+        txn = normalize(raw_txn, name, "pdf", path, imported_at, seq=seq)
+        if txn.amount == "":
+            result.parse_warnings.append(f"{name}:{raw_txn.merchant_raw}")
+        txns.append(apply_categories(txn, rules))
+    try:
+        bill_due = parser.parse_bill(EmailMessage(name, "", "", "", "", []), [text])
+    except Exception as e:
+        result.parse_warnings.append(f"{name}: 應繳金額解析失敗 {e}")
+        bill_due = None
+    return txns, bill_due
+
+
+def _ingest_csv(path: str, bank, imported_at, rules, result: IngestResult):
+    name = os.path.basename(path)
+    raw_bytes = _read_file(path, result)
+    if raw_bytes is None:
+        return []
+    csv_bank, raws = _load_csv_txns(raw_bytes)
+    if not raws:
+        result.needs_parser.append(name)
+        return []
+    if not _bank_matches(bank, csv_bank):
+        result.parse_warnings.append(f"{name}: 是 {csv_bank} 的檔案，不符 --bank {bank}，略過")
+        return []
+    result.parsed.append(f"{name} -> {csv_bank} ({len(raws)}筆)")
+    # CSV 是依日期範圍匯出，重疊的兩份檔案裡同一筆的列位置會不同，所以 seq 不能
+    # 用列序號；改用「同日同店同額在『這個檔案』內第幾次出現」，兩份檔案才會算出
+    # 同樣的 txn_id 而被去重。一定要一個檔案算一次，合併計數會把跨檔的同一筆
+    # 當成當天第二筆。
+    txns, _ = rekey_txns([normalize(r, name, "csv", path, imported_at) for r in raws])
+    for txn in txns:
+        if txn.amount == "":
+            result.parse_warnings.append(f"{name}:{txn.merchant_raw}")
+    return [apply_categories(t, rules) for t in txns]
 
 
 def ingest_paths(paths: list[str], cfg: Config, imported_at: str,
@@ -161,63 +243,13 @@ def ingest_paths(paths: list[str], cfg: Config, imported_at: str,
     for i, path in enumerate(pdfs):
         if on_progress:
             on_progress(i + 1, len(pdfs))
-        name = os.path.basename(path)
-        try:
-            with open(path, "rb") as f:
-                raw = f.read()
-        except OSError as e:
-            result.unlock_failures.append(f"{name}: 讀檔失敗 {e}")
-            continue
-        res = unlock_pdf(raw, passwords)
-        if not res.ok:
-            result.unlock_failures.append(f"{name}: {res.error}")
-            continue
-        try:
-            parser, raws, text = select_parser_for_pdf(res.data, bank)
-        except Exception as e:
-            result.parse_warnings.append(f"{name}: 文字抽取失敗 {e}")
-            continue
-        if not raws:
-            result.needs_parser.append(name)
-            continue
-        result.parsed.append(f"{name} -> {parser.bank} ({len(raws)}筆)")
-        for seq, raw_txn in enumerate(raws):
-            txn = normalize(raw_txn, name, "pdf", path, imported_at, seq=seq)
-            if txn.amount == "":
-                result.parse_warnings.append(f"{name}:{raw_txn.merchant_raw}")
-            collected.append(apply_categories(txn, category_rules))
-
-        bill_due = parser.parse_bill(EmailMessage(name, "", "", "", "", []), [text])
+        txns, bill_due = _ingest_pdf(path, passwords, bank, imported_at,
+                                     category_rules, result)
+        collected.extend(txns)
         if bill_due:
             bill_dues.append(bill_due)
-
     for path in csvs:
-        name = os.path.basename(path)
-        try:
-            with open(path, "rb") as f:
-                raw_bytes = f.read()
-        except OSError as e:
-            result.unlock_failures.append(f"{name}: 讀檔失敗 {e}")
-            continue
-        bank, raws = _load_csv_txns(raw_bytes)
-        if not raws:
-            result.needs_parser.append(name)
-            continue
-        result.parsed.append(f"{name} -> {bank} ({len(raws)}筆)")
-        # CSV 是依日期範圍匯出，重疊的兩份檔案裡同一筆的列位置會不同，所以 seq
-        # 不能用列序號；改用「同日同店同額在檔內第幾次出現」，兩份檔案才會算出
-        # 同樣的 txn_id 而被去重。
-        occurrences: Counter = Counter()
-        for raw_txn in raws:
-            txn = normalize(raw_txn, name, "csv", path, imported_at)
-            key = (txn.bank, txn.account_last4, txn.date, txn.amount, txn.merchant_raw)
-            seq = occurrences[key]
-            occurrences[key] += 1
-            if seq:
-                txn = normalize(raw_txn, name, "csv", path, imported_at, seq=seq)
-            if txn.amount == "":
-                result.parse_warnings.append(f"{name}:{raw_txn.merchant_raw}")
-            collected.append(apply_categories(txn, category_rules))
+        collected.extend(_ingest_csv(path, bank, imported_at, category_rules, result))
 
     if csvs:
         rekey_csv_rows(cfg.csv_path)  # 舊版 seq 編號的 CSV 列先轉成新編號再去重
