@@ -16,12 +16,12 @@ def _rules_file(tmp_path):
     p = tmp_path / "categories.yaml"
     p.write_text(textwrap.dedent("""
         rules:
-          - {keyword: "全聯", l1: "食", l2: "生活採買"}
+          - {keyword: "全聯", l1: "Food", l2: "Groceries"}
     """), encoding="utf-8")
     return str(p)
 
 
-def _txn(merchant, l1="未分類", l2=""):
+def _txn(merchant, l1="Uncategorized", l2=""):
     return Transaction(
         txn_id=merchant, date="2026-06-01", post_date="", amount="100.00",
         currency="TWD", merchant_raw=merchant, merchant_norm="",
@@ -39,15 +39,15 @@ def test_rebuild_recategorizes_and_writes_back(tmp_path):
     assert n == 2
 
     rows = {r.merchant_raw: r for r in read_transactions(csv_path)}
-    assert (rows["全聯福利中心"].category_l1, rows["全聯福利中心"].category_l2) == ("食", "生活採買")
-    assert rows["未知商家"].category_l1 == "未分類"
+    assert (rows["全聯福利中心"].category_l1, rows["全聯福利中心"].category_l2) == ("Food", "Groceries")
+    assert rows["未知商家"].category_l1 == "Uncategorized"
 
     conn = sqlite3.connect(db_path)
     try:
         got = conn.execute(
             "SELECT category_l1 FROM transactions WHERE merchant_raw='全聯福利中心'"
         ).fetchone()[0]
-        assert got == "食"
+        assert got == "Food"
     finally:
         conn.close()
 
@@ -61,7 +61,7 @@ def test_main_rebuild_subcommand(tmp_path):
         "--categories", _rules_file(tmp_path),
     ])
     assert rc == 0
-    assert read_transactions(csv_path)[0].category_l1 == "食"
+    assert read_transactions(csv_path)[0].category_l1 == "Food"
 
 
 def test_rebuild_atomic_rewrite_failure_leaves_csv_intact(tmp_path, monkeypatch):
@@ -142,7 +142,7 @@ def test_rebuild_defaults_come_from_config(tmp_path):
 
     rc = main(["rebuild", "--config", cfg])
     assert rc == 0
-    assert read_transactions(csv_path)[0].category_l1 == "食"
+    assert read_transactions(csv_path)[0].category_l1 == "Food"
     assert os.path.exists(db_path), "rebuild 沒寫到 config.yaml 指定的 db_path"
 
 
@@ -162,7 +162,7 @@ def test_rebuild_explicit_flags_override_config(tmp_path):
     assert rc == 0
     assert os.path.exists(cli_db)
     assert not os.path.exists(str(tmp_path / "ignored.db"))
-    assert read_transactions(cli_csv)[0].category_l1 == "食"
+    assert read_transactions(cli_csv)[0].category_l1 == "Food"
 
 
 def test_rebuild_without_config_file_falls_back_to_defaults(tmp_path, monkeypatch):
@@ -170,10 +170,10 @@ def test_rebuild_without_config_file_falls_back_to_defaults(tmp_path, monkeypatc
     monkeypatch.chdir(tmp_path)
     append_transactions("transactions.csv", [_txn("全聯福利中心")])
     (tmp_path / "categories.yaml").write_text(
-        'rules:\n  - {keyword: "全聯", l1: "食", l2: "生活採買"}\n', encoding="utf-8"
+        'rules:\n  - {keyword: "全聯", l1: "Food", l2: "Groceries"}\n', encoding="utf-8"
     )
 
     rc = main(["rebuild"])
     assert rc == 0
     assert os.path.exists("mailquill.db")
-    assert read_transactions("transactions.csv")[0].category_l1 == "食"
+    assert read_transactions("transactions.csv")[0].category_l1 == "Food"

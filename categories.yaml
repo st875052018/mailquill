@@ -1,115 +1,611 @@
 # 關鍵字 → (第一層, 第二層)；比對為「關鍵字出現在商家字串內」，由上而下取第一個命中。
 rules:
-  - {keyword: "餐廳", l1: "食", l2: "餐飲"}
-  - {keyword: "全聯", l1: "食", l2: "生活採買"}
-  - {keyword: "家樂福", l1: "食", l2: "生活採買"}
-  - {keyword: "POYA", l1: "衣", l2: "生活採買"}
-  - {keyword: "全家", l1: "食", l2: "便利商店"}
-  - {keyword: "7-ELEVEN", l1: "食", l2: "便利商店"}
-  - {keyword: "星巴克", l1: "食", l2: "餐飲"}
-  - {keyword: "麥當勞", l1: "食", l2: "餐飲"}
-  - {keyword: "Uber Eats", l1: "食", l2: "外送"}
-  - {keyword: "foodpanda", l1: "食", l2: "外送"}
-  - {keyword: "Uber", l1: "行", l2: "計程車"}
-  - {keyword: "計程車", l1: "行", l2: "計程車"}
-  - {keyword: "高鐵", l1: "行", l2: "高鐵"}
-  - {keyword: "THSR", l1: "行", l2: "高鐵"}
-  - {keyword: "悠遊卡", l1: "行", l2: "大眾運輸"}
-  - {keyword: "中華電信", l1: "住", l2: "通訊"}
-  - {keyword: "台電", l1: "住", l2: "水電瓦斯"}
-  - {keyword: "自來水", l1: "住", l2: "水電瓦斯"}
-  - {keyword: "誠品", l1: "育", l2: "書籍"}
-  - {keyword: "藥局", l1: "醫療", l2: "藥品"}
-  - {keyword: "醫院", l1: "醫療", l2: "醫療"}
-  - {keyword: "診所", l1: "醫療", l2: "醫療"}
-  - {keyword: "物理治療", l1: "醫療", l2: "醫療"}
-  - {keyword: "牙醫", l1: "醫療", l2: "醫療"}
+  - {keyword: ＪｕＪｕＳｐａｎｉｓ, l1: Food, l2: Dining}
+  - {keyword: ＴｈｅＡｎｔｉｐｏｄ, l1: Food, l2: ''}
+  - {keyword: ＤｏｔＤｏｔ﹡少點鹽企, l1: Food, l2: ''}
+  - {keyword: 八方雲集台塑店, l1: Food, l2: ''}
+  - {keyword: ZOZO MARIN STUDIUM 100001, l1: Food, l2: ''}
+  - {keyword: 潤泰旭展股份有限公司, l1: Food, l2: ''}
+  - {keyword: ＭｉａＣ’ｂｏｎ－高, l1: Shopping, l2: ''}
+  - {keyword: 財團法人奇美博物館基金, l1: Entertainment, l2: Tickets}
+  - {keyword: 財團法人私立高雄醫, l1: Medical, l2: Care}
+  - {keyword: "餐廳", l1: "Food", l2: "Dining"}
+  # 中信 PDF 商家由 OCR 補回（見 parsers/ctbc.py），字元常有雜訊，關鍵字取穩定的片段
+  - {keyword: "雞肉飯", l1: "Food", l2: "Dining"}
+  - {keyword: "鵝肉", l1: "Food", l2: "Dining"}
+  - {keyword: "呈信", l1: "Food", l2: "Dining"}
+  - {keyword: "八方雲集", l1: "Food", l2: "Dining"}
+  - {keyword: "POKE", l1: "Food", l2: "Dining"}
+  - {keyword: "食堂", l1: "Food", l2: "Dining"}
+  - {keyword: "輕食", l1: "Food", l2: "Dining"}
+  - {keyword: "水煮蛋", l1: "Food", l2: "Dining"}
+  - {keyword: "采食集", l1: "Food", l2: "Dining"}
+  - {keyword: "12MINI", l1: "Food", l2: "Dining"}
+  - {keyword: "米潮味", l1: "Food", l2: "Dining"}
+  # HSBC PDF 商家由 OCR 補回（見 parsers/hsbc.py），前綴常混入國旗小圖雜訊（APE7844…），
+  # 關鍵字只取店名主體；2026-07 日本行
+  - {keyword: "LIFECORPORAT", l1: "Food", l2: "Groceries"}
+  - {keyword: "TOKYUSTORE", l1: "Food", l2: "Groceries"}
+  - {keyword: "BLUEBOTTL", l1: "Food", l2: "Dining"}
+  - {keyword: "CHIYANOTKEDA", l1: "Food", l2: "Dining"}
+  - {keyword: "BICCAMERA", l1: "Shopping", l2: "Electronics"}
+  - {keyword: "MUJTIRUSHI", l1: "Shopping", l2: "Department"}
+  - {keyword: "ISETAN", l1: "Shopping", l2: "Department"}
+  - {keyword: "DONGQU", l1: "Shopping", l2: "Department"}
+  - {keyword: "DONQU", l1: "Shopping", l2: "Department"}
+  - {keyword: "3COINS", l1: "Shopping", l2: "Department"}
+  - {keyword: "SHMANS", l1: "Shopping", l2: "Department"}
+  - {keyword: "JREASTSI", l1: "Shopping", l2: "Department"}
+  - {keyword: "JREASTSHOPPING", l1: "Shopping", l2: "Department"}
+  # 2026-09 日本行（HSBC OCR）
+  - {keyword: "JREASTHOTEL", l1: "Entertainment", l2: "Lodging"}
+  - {keyword: "HANEDAKUUKOU", l1: "Entertainment", l2: "Travel"}
+  - {keyword: "NANAMIKA", l1: "Shopping", l2: "Apparel"}
+  - {keyword: "FREAKSSTORE", l1: "Shopping", l2: "Apparel"}
+  - {keyword: "TNF/", l1: "Shopping", l2: "Apparel"}
+  - {keyword: "LARTISANPARFUMEUR", l1: "Shopping", l2: "Beauty"}
+  - {keyword: "PHARMACY", l1: "Shopping", l2: "Drugstore"}
+  - {keyword: "ROPPONGIHILLS", l1: "Shopping", l2: "Department"}
+  - {keyword: "SUNSHINECITY", l1: "Shopping", l2: "Department"}
+  - {keyword: "GOTANDATOKYU", l1: "Shopping", l2: "Department"}
+  - {keyword: "IKEBUKUROLOFT", l1: "Shopping", l2: "Department"}
+  - {keyword: "SHIBUYALOFT", l1: "Shopping", l2: "Department"}
+  - {keyword: "DISNEYSTORE", l1: "Shopping", l2: "Department"}
+  - {keyword: "FFICIALGOOD", l1: "Shopping", l2: "Department"}
+  - {keyword: "MUSASI", l1: "Shopping", l2: "Online"}
+  - {keyword: "DRAFTSHARKS", l1: "Shopping", l2: "Online"}
+  - {keyword: "FAMILYMART", l1: "Food", l2: "ConvenienceStore"}
+  - {keyword: "STARBUCKS", l1: "Food", l2: "Dining"}
+  - {keyword: "SUSHI", l1: "Food", l2: "Dining"}
+  - {keyword: "IZZA", l1: "Food", l2: "Dining"}
+  - {keyword: "CAFE", l1: "Food", l2: "Dining"}
+  - {keyword: "COFFEE", l1: "Food", l2: "Dining"}
+  - {keyword: "COF", l1: "Food", l2: "Dining"}
+  - {keyword: "KINTAROU", l1: "Food", l2: "Dining"}
+  - {keyword: "LAMBERT", l1: "Food", l2: "Dining"}
+  - {keyword: "SAGATAN", l1: "Food", l2: "Dining"}
+  - {keyword: "ABOUTLIFE", l1: "Food", l2: "Dining"}
+  - {keyword: "WAFFLE", l1: "Food", l2: "Dining"}
+  - {keyword: "KENYAN", l1: "Food", l2: "Dining"}
+  - {keyword: "ITOEN", l1: "Food", l2: "Dining"}
+  - {keyword: "JREASTRESTAURANT", l1: "Food", l2: "Dining"}
+  - {keyword: "CO0SAOYAMA", l1: "Food", l2: "Dining"}
+  - {keyword: "AOYAMA", l1: "Food", l2: "Dining"}
+  # 中信 OCR
+  - {keyword: "餐盒", l1: "Food", l2: "Dining"}
+  - {keyword: "佩佩奶奶", l1: "Food", l2: "Dining"}
+  - {keyword: "全聯", l1: "Food", l2: "Groceries"}
+  - {keyword: "家樂福", l1: "Food", l2: "Groceries"}
+  - {keyword: "POYA", l1: "Shopping", l2: "Drugstore"}
+  - {keyword: "全家", l1: "Food", l2: "ConvenienceStore"}
+  - {keyword: "7-ELEVEN", l1: "Food", l2: "ConvenienceStore"}
+  - {keyword: "星巴克", l1: "Food", l2: "Dining"}
+  - {keyword: "麥當勞", l1: "Food", l2: "Dining"}
+  - {keyword: "ＭＯＳ－", l1: "Food", l2: "Dining"}
+  - {keyword: "Uber Eats", l1: "Food", l2: "Delivery"}
+  - {keyword: "foodpanda", l1: "Food", l2: "Delivery"}
+  - {keyword: "Uber", l1: "Transport", l2: "Uber"}
+  - {keyword: "計程車", l1: "Transport", l2: "Taxi"}
+  - {keyword: "高鐵", l1: "Transport", l2: "HSR"}
+  - {keyword: "THSR", l1: "Transport", l2: "HSR"}
+  - {keyword: "悠遊卡", l1: "Transport", l2: "PublicTransit"}
+  - {keyword: "中華電信", l1: "Housing", l2: "Telecom"}
+  - {keyword: "台電", l1: "Housing", l2: "Utilities"}
+  - {keyword: "自來水", l1: "Housing", l2: "Utilities"}
+  - {keyword: "轉帳房租", l1: "Housing", l2: "Rent"}
+  - {keyword: "誠品", l1: "Education", l2: "Books"}
+  - {keyword: "藥局", l1: "Medical", l2: "Care"}
+  - {keyword: "醫院", l1: "Medical", l2: "Care"}
+  - {keyword: "診所", l1: "Medical", l2: "Care"}
+  - {keyword: "物理治療", l1: "Medical", l2: "Care"}
+  - {keyword: "牙醫", l1: "Medical", l2: "Care"}
   # 旅遊 / 住宿（判斷較主觀，可自行調整）
-  - {keyword: "樂園", l1: "樂", l2: "旅遊"}
-  - {keyword: "飯店", l1: "樂", l2: "旅遊住宿"}
-  - {keyword: "育樂", l1: "樂", l2: "旅遊住宿"}
-  - {keyword: "大飯店", l1: "樂", l2: "旅遊住宿"}
-  - {keyword: "客路", l1: "樂", l2: "旅遊"}
-  - {keyword: "Klook", l1: "樂", l2: "旅遊"}
-  - {keyword: "迪卡", l1: "樂", l2: "運動健身"}
-  - {keyword: "DECATHLON", l1: "樂", l2: "運動健身"}
-  - {keyword: "Netflix", l1: "樂", l2: "串流訂閱"}
-  - {keyword: "Spotify", l1: "樂", l2: "串流訂閱"}
+  - {keyword: "樂園", l1: "Entertainment", l2: "Travel"}
+  - {keyword: "飯店", l1: "Entertainment", l2: "Lodging"}
+  - {keyword: "育樂", l1: "Entertainment", l2: "Lodging"}
+  - {keyword: "大飯店", l1: "Entertainment", l2: "Lodging"}
+  - {keyword: "客路", l1: "Entertainment", l2: "Travel"}
+  - {keyword: "Klook", l1: "Entertainment", l2: "Travel"}
+  - {keyword: "AIRBNB", l1: "Entertainment", l2: "Travel"}
+  - {keyword: "tripla", l1: "Entertainment", l2: "Lodging"}
+  - {keyword: "迪卡", l1: "Entertainment", l2: "Fitness"}
+  - {keyword: "DECATHLON", l1: "Entertainment", l2: "Fitness"}
+  - {keyword: "Netflix", l1: "Entertainment", l2: "Streaming"}
+  - {keyword: "Spotify", l1: "Entertainment", l2: "Streaming"}
   # 育兒
-  - {keyword: "嬰", l1: "育", l2: "育兒"}
-  - {keyword: "童館", l1: "育", l2: "育兒"}
-  - {keyword: "卡多摩", l1: "育", l2: "育兒"}
+  - {keyword: "嬰", l1: "Education", l2: "Childcare"}
+  - {keyword: "童館", l1: "Education", l2: "Childcare"}
+  - {keyword: "卡多摩", l1: "Education", l2: "Childcare"}
   # Uber 區分：叫車(含 車隊/Qtaxi/優步福爾摩沙)→行/計程車；其餘「優步－<餐廳>」
   # 視為 Uber Eats→食/外送。叫車關鍵字務必排在「優步」catch-all 之前。
-  - {keyword: "車隊", l1: "行", l2: "計程車"}
-  - {keyword: "Qtaxi", l1: "行", l2: "計程車"}
-  - {keyword: "優步福爾摩沙", l1: "行", l2: "計程車"}
-  - {keyword: "yoxi", l1: "行", l2: "計程車"}
-  - {keyword: "台灣大車隊", l1: "行", l2: "計程車"}
-  - {keyword: "優步", l1: "食", l2: "外送"}
-  - {keyword: "停車", l1: "行", l2: "停車"}
-  - {keyword: "普客二四", l1: "行", l2: "停車"}
-  - {keyword: "eTag", l1: "行", l2: "停車"}
-  - {keyword: "加油", l1: "行", l2: "加油"}
-  - {keyword: "中油", l1: "行", l2: "加油"}
-  - {keyword: "台鐵", l1: "行", l2: "大眾運輸"}
-  - {keyword: "捷運", l1: "行", l2: "大眾運輸"}
-  - {keyword: "和運租車", l1: "行", l2: "租車"}
-  - {keyword: "和雲", l1: "行", l2: "租車"}
+  - {keyword: "車隊", l1: "Transport", l2: "Taxi"}
+  - {keyword: "Qtaxi", l1: "Transport", l2: "Taxi"}
+  - {keyword: "優步福爾摩沙", l1: "Transport", l2: "Taxi"}
+  - {keyword: "yoxi", l1: "Transport", l2: "Taxi"}
+  - {keyword: "台灣大車隊", l1: "Transport", l2: "Taxi"}
+  - {keyword: "優步", l1: "Food", l2: "Delivery"}
+  - {keyword: "停車", l1: "Transport", l2: "Parking"}
+  - {keyword: "普客二四", l1: "Transport", l2: "Parking"}
+  - {keyword: "eTag", l1: "Transport", l2: "Parking"}
+  - {keyword: "臺北市停管處", l1: "Transport", l2: "Parking"}
+  - {keyword: "加油", l1: "Transport", l2: "Gas"}
+  - {keyword: "中油", l1: "Transport", l2: "Gas"}
+  - {keyword: "台鐵", l1: "Transport", l2: "PublicTransit"}
+  - {keyword: "捷運", l1: "Transport", l2: "PublicTransit"}
+  - {keyword: "BUS/MRT", l1: "Transport", l2: "PublicTransit"}
+  - {keyword: "和運租車", l1: "Transport", l2: "CarRental"}
+  - {keyword: "和雲", l1: "Transport", l2: "CarRental"}
+  - {keyword: "城市車旅", l1: "Transport", l2: "CarRental"}
   # 養車（自有車相關）
-  - {keyword: "國道", l1: "行", l2: "國道通行"}
-  - {keyword: "通行費", l1: "行", l2: "國道通行"}
-  - {keyword: "遠通電收", l1: "行", l2: "國道通行"}
-  - {keyword: "保養廠", l1: "行", l2: "汽車保養"}
-  - {keyword: "汽車保養", l1: "行", l2: "汽車保養"}
-  - {keyword: "輪胎", l1: "行", l2: "汽車保養"}
-  - {keyword: "洗車", l1: "行", l2: "汽車保養"}
-  - {keyword: "牌照稅", l1: "行", l2: "汽車稅費"}
-  - {keyword: "燃料稅", l1: "行", l2: "汽車稅費"}
-  - {keyword: "監理", l1: "行", l2: "汽車稅費"}
+  - {keyword: "國道", l1: "Transport", l2: "HighwayToll"}
+  - {keyword: "通行費", l1: "Transport", l2: "HighwayToll"}
+  - {keyword: "遠通電收", l1: "Transport", l2: "HighwayToll"}
+  - {keyword: "保養廠", l1: "Transport", l2: "CarMaintenance"}
+  - {keyword: "汽車保養", l1: "Transport", l2: "CarMaintenance"}
+  - {keyword: "輪胎", l1: "Transport", l2: "CarMaintenance"}
+  - {keyword: "洗車", l1: "Transport", l2: "CarMaintenance"}
+  - {keyword: "牌照稅", l1: "Transport", l2: "CarTax"}
+  - {keyword: "燃料稅", l1: "Transport", l2: "CarTax"}
+  - {keyword: "監理", l1: "Transport", l2: "CarTax"}
   # 餐飲（通用關鍵字，命中常見餐飲類型）
-  - {keyword: "餐飲", l1: "食", l2: "餐飲"}
-  - {keyword: "美食", l1: "食", l2: "餐飲"}
-  - {keyword: "早餐", l1: "食", l2: "餐飲"}
-  - {keyword: "麥味登", l1: "食", l2: "餐飲"}
-  - {keyword: "午餐", l1: "食", l2: "餐飲"}
-  - {keyword: "茶", l1: "食", l2: "餐飲"}
-  - {keyword: "咖啡", l1: "食", l2: "餐飲"}
-  - {keyword: "壽司", l1: "食", l2: "餐飲"}
-  - {keyword: "麵", l1: "食", l2: "餐飲"}
+  - {keyword: "餐飲", l1: "Food", l2: "Dining"}
+  - {keyword: "美食", l1: "Food", l2: "Dining"}
+  - {keyword: "早餐", l1: "Food", l2: "Dining"}
+  - {keyword: "麥味登", l1: "Food", l2: "Dining"}
+  - {keyword: "午餐", l1: "Food", l2: "Dining"}
+  - {keyword: "茶", l1: "Food", l2: "Dining"}
+  - {keyword: "咖啡", l1: "Food", l2: "Dining"}
+  - {keyword: "壽司", l1: "Food", l2: "Dining"}
+  - {keyword: "麵", l1: "Food", l2: "Dining"}
   # 數位 / 訂閱服務
-  - {keyword: "APPLE.COM", l1: "樂", l2: "數位內容"}
-  - {keyword: "GOOGLE", l1: "其他", l2: "雲端服務"}
-  - {keyword: "Gandi", l1: "其他", l2: "雲端服務"}
-  - {keyword: "AWS", l1: "其他", l2: "雲端服務"}
+  - {keyword: "APPLE.COM", l1: "Entertainment", l2: "Digital"}
+  - {keyword: "GOOGLE", l1: "Other", l2: "Cloud"}
+  - {keyword: "Gandi", l1: "Other", l2: "Cloud"}
+  - {keyword: "AWS", l1: "Other", l2: "Cloud"}
   # 保險 / 金融
-  - {keyword: "保險費", l1: "保險", l2: "保費"}
-  - {keyword: "人壽", l1: "保險", l2: "保費"}
-  - {keyword: "三商美邦", l1: "保險", l2: "保費"}
-  - {keyword: "國外交易手續費", l1: "其他", l2: "手續費"}
-  - {keyword: "年費", l1: "其他", l2: "手續費"}
-  - {keyword: "掛失", l1: "其他", l2: "手續費"}
-  - {keyword: "點數折抵", l1: "其他", l2: "折抵回饋"}
-  - {keyword: "現金回饋", l1: "其他", l2: "折抵回饋"}
-  - {keyword: "刷卡金", l1: "其他", l2: "折抵回饋"}
-  - {keyword: "財團法人", l1: "捐款", l2: "捐款"}
-  - {keyword: "社會福利", l1: "捐款", l2: "捐款"}
-  - {keyword: "防盲基金會", l1: "捐款", l2: "捐款"}
+  - {keyword: "保險費", l1: "Insurance", l2: "Premium"}
+  - {keyword: "人壽", l1: "Insurance", l2: "Premium"}
+  - {keyword: "三商美邦", l1: "Insurance", l2: "Premium"}
+  - {keyword: "國外交易手續費", l1: "Other", l2: "Fee"}
+  - {keyword: "年費", l1: "Other", l2: "Fee"}
+  - {keyword: "掛失", l1: "Other", l2: "Fee"}
+  - {keyword: "點數折抵", l1: "Other", l2: "Cashback"}
+  - {keyword: "現金回饋", l1: "Other", l2: "Cashback"}
+  - {keyword: "刷卡金", l1: "Other", l2: "Cashback"}
   # 運動 / 休閒
-  - {keyword: "健身工廠", l1: "樂", l2: "運動健身"}
-  - {keyword: "健身", l1: "樂", l2: "運動健身"}
+  - {keyword: "健身工廠", l1: "Entertainment", l2: "Fitness"}
+  - {keyword: "健身", l1: "Entertainment", l2: "Fitness"}
   # 百貨 / 購物
-  - {keyword: "宜得利", l1: "購", l2: "百貨"}
-  - {keyword: "揚龍", l1: "購", l2: ""}
-  - {keyword: "IKEA", l1: "購", l2: "百貨"}
-  - {keyword: "SOGO", l1: "購", l2: "百貨"}
-  - {keyword: "美麗華百樂園", l1: "購", l2: "百貨"}
-  - {keyword: "華泰名品城", l1: "購", l2: "百貨"}
-  - {keyword: "CITYLINK", l1: "購", l2: "百貨"}
-  - {keyword: "三創", l1: "購", l2: "3C"}
-  - {keyword: "GlobalMall", l1: "購", l2: "百貨"}
-  - {keyword: "新光三越", l1: "購", l2: "百貨"}
-  - {keyword: "ＣＩＴＹＬＩＮＫ", l1: "購", l2: "百貨"}
-  - {keyword: "百貨", l1: "購", l2: "百貨"}
-  - {keyword: "UNIQLO", l1: "衣", l2: "服飾"}
-  - {keyword: "ZARA", l1: "衣", l2: "服飾"}
+  - {keyword: "宜得利", l1: "Shopping", l2: "Department"}
+  - {keyword: "揚龍", l1: "Shopping", l2: "Department"}
+  - {keyword: "IKEA", l1: "Shopping", l2: "Department"}
+  - {keyword: "SOGO", l1: "Shopping", l2: "Department"}
+  - {keyword: "美麗華百樂園", l1: "Shopping", l2: "Department"}
+  - {keyword: "華泰名品城", l1: "Shopping", l2: "Department"}
+  - {keyword: "CITYLINK", l1: "Shopping", l2: "Department"}
+  - {keyword: "三創", l1: "Shopping", l2: "Electronics"}
+  - {keyword: "GlobalMall", l1: "Shopping", l2: "Department"}
+  - {keyword: "新光三越", l1: "Shopping", l2: "Department"}
+  - {keyword: "ＣＩＴＹＬＩＮＫ", l1: "Shopping", l2: "Department"}
+  - {keyword: "百貨", l1: "Shopping", l2: "Department"}
+  - {keyword: "UNIQLO", l1: "Shopping", l2: "Apparel"}
+  - {keyword: "ZARA", l1: "Shopping", l2: "Apparel"}
+  - {keyword: ENTERPRISE RENT-A-CAARCADIA CA, l1: "Transport", l2: "CarRental"}
+  - {keyword: AplPay CALVIN KLEIN CABAZON CA, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay TST* WETZEL'SCABAZON CA, l1: "Food", l2: "Dining"}
+  - {keyword: CABAZON CA PREMIUM CABAZON, l1: "Shopping", l2: "Apparel"}
+  - {keyword: CALVIN KLEIN 009 CABAZON, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay HUGO BOSS RETNEW YORK NY, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay LEVI'S OUTLETCABAZON CA, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay LS COACH CAFECABAZON CA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay POLO FACTORY CABAZON CA, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay SAMSONITE FCTCABAZON CA, l1: "Shopping", l2: "Department"}
+  - {keyword: AplPay SKECHERS USA CABAZON CA, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay CHEVRON 03773LAS VEGAS NV, l1: "Transport", l2: "Gas"}
+  - {keyword: AplPay DUTCH BROS NVLAS VEGAS NV, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay EINSTEIN BROSLAS VEGAS NV, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay H MART LAS VELAS VEGAS NV, l1: "Food", l2: "Groceries"}
+  - {keyword: AplPay TRAVEL CENTERBAKER CA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay CHIPOTLE LAS VEGAS NV, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay EAGLES LANDINMESQUITE NV, l1: "Transport", l2: "Gas"}
+  - {keyword: AplPay EXXONMOBIL KANAB UT, l1: "Transport", l2: "Gas"}
+  - {keyword: LAS VEGAS CANDLEWOODLAS VEGAS NV, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: MARRIOTT GRAND CHATELAS VEGAS NV, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: Residence Inn By MarArcadia CA, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: ARCO 241976 ARCADIA CA, l1: "Transport", l2: "Gas"}
+  - {keyword: 'AplPay ABC #103 LV 0LAS VEGAS NV', l1: "Food", l2: "Groceries"}
+  - {keyword: AplPay THE MAD GREEKBAKER CA, l1: "Food", l2: "Dining"}
+  - {keyword: PETER LUGER STEAK HOLAS VEGAS NV, l1: "Food", l2: "Dining"}
+  - {keyword: TELLO US TELLO US ATLANTA GA, l1: "Shopping", l2: "Online"}
+  - {keyword: VICTORIA'S SECRET 11LAS VEGAS NV, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay CITY OF SANTASANTA MONICA CA, l1: "Other", l2: "GovFee"}
+  - {keyword: AplPay EREWHON PASADPASADENA CA, l1: "Food", l2: "Groceries"}
+  - {keyword: AplPay FIVE BELOW 14MONROVIA CA, l1: "Shopping", l2: "Department"}
+  - {keyword: AplPay IN-N-OUT MONRMONROVIA CA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay THE GETTY PARLOS ANGELES CA, l1: "Transport", l2: "Parking"}
+  - {keyword: AplPay UNION 76 0951ARCADIA CA, l1: "Transport", l2: "Gas"}
+  - {keyword: WATER GRILL SANTA MOSANTA MONICA CA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay CLAUDE.AI SUBSAN FRANCISCO CA, l1: "Shopping", l2: "Electronics"}
+  - {keyword: AplPay LAZ PARKING MLOS ANGELES CA, l1: "Transport", l2: "Parking"}
+  - {keyword: AplPay SALAD BAR LOS ANGELES CA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay STARBUCKS 800-782-7282 WA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay THE COMMENCEMLos Angeles CA, l1: "Shopping", l2: "Department"}
+  - {keyword: USC BOOKSTORE-WIRELELOS ANGELES CA, l1: "Education", l2: "School"}
+  - {keyword: AplPay BLUE BOTTLE CLos Angeles CA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay CTLP*PHOTO-MAOAKLAND CA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay GRAND CENTRALLos Angeles CA, l1: "Food", l2: "Dining"}
+  - {keyword: AplPay MALIN+GOETZ Los Angeles CA, l1: "Shopping", l2: "Department"}
+  - {keyword: AplPay SP BAGGU SAN FRANCISCO CA, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay TARGET STORESBURBANK CA, l1: "Shopping", l2: "Department"}
+  - {keyword: VILLAS TACOS LOS ANGLOS ANGELES CA, l1: "Food", l2: "Dining"}
+  - {keyword: AMAZON PRIME AMAZON.SAPPORO HO, l1: "Shopping", l2: "Online"}
+  - {keyword: AplPay MAX TOUR LLC HENDERSON NV, l1: "Entertainment", l2: "Travel"}
+  - {keyword: AplPay SP RHODE SKINBEVERLY HILLS CA, l1: "Shopping", l2: "Department"}
+  - {keyword: AplPay AIRBNB * HMYXSAN FRANCISCO CA, l1: "Entertainment", l2: "Travel"}
+  - {keyword: AplPay SP STUSSY.COMIRVINE CA, l1: "Shopping", l2: "Apparel"}
+  - {keyword: AplPay PADDLE.NET* TASTORIA NY, l1: "Shopping", l2: "Online"}
+  - {keyword: JP FBA SAPPORO HO, l1: "Shopping", l2: "Online"}
+  - {keyword: AplPay ANTHROPIC* CLSAN FRANCISCO CA, l1: "Shopping", l2: "Electronics"}
+  - {keyword: ALASKA AIRLINES SEATTLE WA, l1: "Entertainment", l2: "Travel"}
+  - {keyword: JR EAST HOTEL METS GTOKYO JP, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: AplPay ANTHROPIC SAN FRANCISCO CA, l1: "Shopping", l2: "Electronics"}
+  - {keyword: 長榮航空, l1: "Entertainment", l2: "Travel"}
+  - {keyword: EVA AIR, l1: "Entertainment", l2: "Travel"}
+  - {keyword: CHINA AIRLINES, l1: "Entertainment", l2: "Travel"}
+  - {keyword: COURTYARD, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: NOHGA HOTEL, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: MARRIOTT, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: ALOFT, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: JR EAST HOTEL, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: HOSHINO, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: RENAISSANCE, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: 萬豪, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: IKYU, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: BOOKING.CO, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: 民宿, l1: "Entertainment", l2: "Lodging"}
+  - {keyword: 拓元票務, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: tixCraft, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: KKTIX, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: INDIEVOX, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: TICKET BOARD, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: TICKETP, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: 寬宏藝術經紀, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: udn售票網, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: 國家表演藝術中心, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: 富邦勇士售票網, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: 中信兄弟售票網, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: TICKET PIA, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: TICKETJAM, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: PLAYGUIDE, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: 安源資訊, l1: "Entertainment", l2: "Tickets"}
+  - {keyword: 微風, l1: "Shopping", l2: "Department"}
+  - {keyword: 台北101購物, l1: "Shopping", l2: "Department"}
+  - {keyword: ATT4FUN, l1: "Shopping", l2: "Department"}
+  - {keyword: 遠東巨城, l1: "Shopping", l2: "Department"}
+  - {keyword: HANKYU, l1: "Shopping", l2: "Department"}
+  - {keyword: MATSUYA, l1: "Shopping", l2: "Department"}
+  - {keyword: SHINSEGAE, l1: "Shopping", l2: "Department"}
+  - {keyword: MUJI, l1: "Shopping", l2: "Department"}
+  - {keyword: DISNEY STORE, l1: "Shopping", l2: "Department"}
+  - {keyword: KITTE, l1: "Shopping", l2: "Department"}
+  - {keyword: MITSUI, l1: "Shopping", l2: "Department"}
+  - {keyword: EKIMO, l1: "Shopping", l2: "Department"}
+  - {keyword: YUMETAUN, l1: "Shopping", l2: "Department"}
+  - {keyword: TOKYO ICHIBANGAI, l1: "Shopping", l2: "Department"}
+  - {keyword: NINTENDO MUSEUM, l1: "Shopping", l2: "Department"}
+  - {keyword: 福維克, l1: "Shopping", l2: "Department"}
+  - {keyword: 寶雅, l1: "Shopping", l2: "Drugstore"}
+  - {keyword: momo, l1: "Shopping", l2: "Online"}
+  - {keyword: 蝦皮, l1: "Shopping", l2: "Online"}
+  - {keyword: PCHOME, l1: "Shopping", l2: "Online"}
+  - {keyword: AMAZON, l1: "Shopping", l2: "Online"}
+  - {keyword: Global-E, l1: "Shopping", l2: "Online"}
+  - {keyword: BIC CAMERA, l1: "Shopping", l2: "Electronics"}
+  - {keyword: YODOBASHI, l1: "Shopping", l2: "Electronics"}
+  - {keyword: 蘋果電腦, l1: "Shopping", l2: "Electronics"}
+  - {keyword: APPLESTORE, l1: "Shopping", l2: "Electronics"}
+  - {keyword: ABC-MART, l1: "Shopping", l2: "Apparel"}
+  - {keyword: NIKE, l1: "Shopping", l2: "Apparel"}
+  - {keyword: POLO RALPH LAUREN, l1: "Shopping", l2: "Apparel"}
+  - {keyword: BEAMS JAPAN, l1: "Shopping", l2: "Apparel"}
+  - {keyword: ISSEYMIYAKE, l1: "Shopping", l2: "Apparel"}
+  - {keyword: ALPEN, l1: "Entertainment", l2: "Fitness"}
+  - {keyword: SUPER SPORTS, l1: "Entertainment", l2: "Fitness"}
+  - {keyword: B&F SPORTS, l1: "Entertainment", l2: "Fitness"}
+  - {keyword: SUKIYA, l1: "Food", l2: "Dining"}
+  - {keyword: Subway, l1: "Food", l2: "Dining"}
+  - {keyword: 朱記, l1: "Food", l2: "Dining"}
+  - {keyword: 君悅排骨, l1: "Food", l2: "Dining"}
+  - {keyword: 詹記麻辣火鍋, l1: "Food", l2: "Dining"}
+  - {keyword: 巷子口食堂, l1: "Food", l2: "Dining"}
+  - {keyword: 俺達的肉屋, l1: "Food", l2: "Dining"}
+  - {keyword: 年三十, l1: "Food", l2: "Dining"}
+  - {keyword: 二本松涮涮屋, l1: "Food", l2: "Dining"}
+  - {keyword: 春大直, l1: "Food", l2: "Dining"}
+  - {keyword: 燒魂, l1: "Food", l2: "Dining"}
+  - {keyword: 聚鍋, l1: "Food", l2: "Dining"}
+  - {keyword: 鼎泰豐, l1: "Food", l2: "Dining"}
+  - {keyword: 海底撈, l1: "Food", l2: "Dining"}
+  - {keyword: 原味火鍋小吃店, l1: "Food", l2: "Dining"}
+  - {keyword: 豚知, l1: "Food", l2: "Dining"}
+  - {keyword: 迷路小章魚, l1: "Food", l2: "Dining"}
+  - {keyword: 刁民酸菜魚, l1: "Food", l2: "Dining"}
+  - {keyword: 地中海餐酒館, l1: "Food", l2: "Dining"}
+  - {keyword: 啜飲室, l1: "Food", l2: "Dining"}
+  - {keyword: PASTA&CO, l1: "Food", l2: "Dining"}
+  - {keyword: woolloomoo, l1: "Food", l2: "Dining"}
+  - {keyword: 多那之, l1: "Food", l2: "Dining"}
+  - {keyword: 潤小貳, l1: "Food", l2: "Dining"}
+  - {keyword: POKE+, l1: "Food", l2: "Dining"}
+  - {keyword: SEA南洋, l1: "Food", l2: "Dining"}
+  - {keyword: 品都串燒攤, l1: "Food", l2: "Dining"}
+  - {keyword: 畬室, l1: "Food", l2: "Dining"}
+  - {keyword: 台灣美富國際, l1: "Food", l2: "Dining"}
+  - {keyword: MATSUE EBISUTEN, l1: "Food", l2: "Dining"}
+  - {keyword: 國營臺灣鐵路公司附業, l1: "Food", l2: "Dining"}
+  - {keyword: 八百屋, l1: "Food", l2: "Groceries"}
+  - {keyword: 台灣雀巢, l1: "Food", l2: "Groceries"}
+  - {keyword: 金車噶瑪蘭, l1: "Food", l2: "Groceries"}
+  - {keyword: SHIKOKU SORAICHIBA, l1: "Food", l2: "Groceries"}
+  - {keyword: SUICA, l1: "Transport", l2: "PublicTransit"}
+  - {keyword: 悠遊加值, l1: "Transport", l2: "PublicTransit"}
+  - {keyword: 統一超商, l1: "Food", l2: "ConvenienceStore"}
+  - {keyword: LINEGO, l1: "Transport", l2: "Taxi"}
+  - {keyword: VPNCOM, l1: "Other", l2: "Cloud"}
+  - {keyword: DAZN, l1: "Entertainment", l2: "Streaming"}
+  - {keyword: EXPLAINTHIS, l1: "Education", l2: "Course"}
+  - {keyword: DAIKOKU DRUG, l1: "Medical", l2: "Care"}
+  - {keyword: 國泰健康管理, l1: "Medical", l2: "Checkup"}
+  - {keyword: 綜所稅, l1: "Other", l2: "Tax"}
+  - {keyword: TEAMLAB, l1: "Entertainment", l2: "Travel"}
+  - {keyword: FUKUTAKE FOUNDATION, l1: "Entertainment", l2: "Travel"}
+  - {keyword: 台北101, l1: "Shopping", l2: "Department"}
+  - {keyword: JR EAST SHOPPING, l1: "Shopping", l2: "Department"}
+  - {keyword: 饗賓餐旅, l1: "Food", l2: "Dining"}
+  - {keyword: 新宿ＨＯＲＵＭＯＮ, l1: "Food", l2: "Dining"}
+  - {keyword: ＤＯＮＤＯＮＤＯＮ, l1: "Food", l2: "Dining"}
+  - {keyword: 國外交易服務費, l1: "Other", l2: "Fee"}
+  - {keyword: KAKAOMOBILITY, l1: "Transport", l2: "KakaoTaxi"}
+  - {keyword: CHARGESPOT, l1: "Transport", l2: "Charging"}
+  - {keyword: GYUKATSUKYOTOKATSUG, l1: "Food", l2: "Dining"}
+  - {keyword: TORIKIZOKU, l1: "Food", l2: "Dining"}
+  - {keyword: SHINJIYUKUNEGISHI, l1: "Food", l2: "Dining"}
+  - {keyword: BUSAN-RESTAURANT, l1: "Food", l2: "Dining"}
+  - {keyword: PURADAK, l1: "Food", l2: "Dining"}
+  - {keyword: KYOBO BOOKS, l1: "Education", l2: "Books"}
+  - {keyword: SEOMYEON365PHARMACY, l1: "Medical", l2: "Care"}
+  - {keyword: H&M HENNES&MAURITZ, l1: "Shopping", l2: "Apparel"}
+  - {keyword: LUMINE ESTO, l1: "Shopping", l2: "Department"}
+  - {keyword: SHINSAIBASHI PARCO, l1: "Shopping", l2: "Department"}
+  - {keyword: DAIMARU DEPT.STORE, l1: "Shopping", l2: "Department"}
+  - {keyword: LOTTESYOPING LOTTEM, l1: "Shopping", l2: "Department"}
+  - {keyword: WEVERS, l1: "Entertainment", l2: "Merchandise"}
+  - {keyword: SKYLINELUGE, l1: "Entertainment", l2: "Attractions"}
+  - {keyword: NINTENDOMUSEUM, l1: "Entertainment", l2: "Attractions"}
+  - {keyword: CJ OLIVE YOUNG, l1: "Shopping", l2: "Beauty"}
+  - {keyword: 83HAECHI GUANGANLIJ130101, l1: "Food", l2: "Dining"}
+  # 連加＊／連支＊ = LINE Pay 付款前綴（使用者確認），逐一對照後面接的實際
+  # 店名分類；前綴本身太籠統故意不建一條 catch-all（後面店家五花八門），
+  # 每筆都是完整字串各自一條規則。
+  - {keyword: 連加＊龜尾家韓式家庭料, l1: Food, l2: Dining}
+  - {keyword: 連加＊春水堂（大直店）, l1: Food, l2: Dining}
+  - {keyword: 連加＊Ｃｈｉｌａｎｇｏ, l1: Food, l2: Dining}
+  - {keyword: 連加＊貪吃狗Ｇｒｅｅｄ, l1: Food, l2: Dining}
+  - {keyword: 連加＊桔梗三明治, l1: Food, l2: Dining}
+  - {keyword: 連加＊涓豆腐（台北敦南, l1: Food, l2: Dining}
+  - {keyword: 連加＊真芳民生敦北店, l1: Food, l2: Dining}
+  - {keyword: 連加＊尹東家食品企業有, l1: Food, l2: Dining}
+  - {keyword: 連加＊ＮＯＫＥ忠泰樂生, l1: Food, l2: Dining}
+  - {keyword: 連加＊京家排骨, l1: Food, l2: Dining}
+  - {keyword: 連加＊八方雲集台朔店, l1: Food, l2: Dining}
+  - {keyword: 連加＊強尼兄弟健康廚房, l1: Food, l2: Dining}
+  - {keyword: 連加＊烤食煮盒（南港新, l1: Food, l2: Dining}
+  - {keyword: 連加＊懶散兔與啾先生, l1: Food, l2: Dining}
+  - {keyword: 連加＊摩斯漢堡, l1: Food, l2: Dining}
+  - {keyword: 連加＊給力盒子＆ｍｄａ, l1: Food, l2: Dining}
+  - {keyword: 連加＊ＴｈｅＯａｓｉ, l1: Food, l2: Dining}
+  - {keyword: 連加＊呦咪日式手作三明, l1: Food, l2: Dining}
+  - {keyword: 連加＊稻夢食光, l1: Food, l2: Dining}
+  - {keyword: 連加＊烤食煮盒（民生店, l1: Food, l2: Dining}
+  - {keyword: 連加＊Ｐａｐｅｒｓｔｒ, l1: Food, l2: Dining}
+  - {keyword: 連加＊瑞記海南雞飯敦北, l1: Food, l2: Dining}
+  - {keyword: 連加＊？食穗, l1: Food, l2: Dining}
+  - {keyword: 連加＊真心豆行七賢店, l1: Food, l2: Dining}
+  - {keyword: 連加＊越南河內傳統料理, l1: Food, l2: Dining}
+  - {keyword: 連加＊鰻魚日記民權店, l1: Food, l2: Dining}
+  - {keyword: 連加＊吉福雞舖（南軟店, l1: Food, l2: Dining}
+  - {keyword: 連加＊富士豬排, l1: Food, l2: Dining}
+  - {keyword: 連加＊軟食力Ｓｏｆｔ, l1: Food, l2: Dining}
+  - {keyword: 連加＊鬍鬚張股份有限公, l1: Food, l2: Dining}
+  - {keyword: 連加＊健人餐廚（四維店, l1: Food, l2: Dining}
+  - {keyword: 連加＊路易莎民生光復店, l1: Food, l2: Dining}
+  - {keyword: 連加＊夏野豆行, l1: Food, l2: Dining}
+  - {keyword: 連加＊繼光香香雞－北捷, l1: Food, l2: Dining}
+  - {keyword: 連加＊水煮蛋蛋, l1: Food, l2: Dining}
+  - {keyword: 連加＊采食集Ｍｉｎｉ, l1: Food, l2: Dining}
+  - {keyword: 連加＊烏弄（高雄六合店, l1: Food, l2: Dining}
+  - {keyword: 連加＊得正＃高雄文化計, l1: Food, l2: Dining}
+  - {keyword: 連加＊清心福全－台北市, l1: Food, l2: Dining}
+  - {keyword: 連加＊烏弄文化林泉店, l1: Food, l2: Dining}
+  - {keyword: 連加＊民族飯糰, l1: Food, l2: Dining}
+  - {keyword: 連加＊婆婆冰店旗艦店, l1: Food, l2: Dining}
+  - {keyword: 連加＊烏弄－文化林泉店, l1: Food, l2: Dining}
+  - {keyword: 連加＊得正＃台北南港計, l1: Food, l2: Dining}
+  - {keyword: 連加＊一沐日＿吉林南京, l1: Food, l2: Dining}
+  - {keyword: 連加＊日月亭股份有限公, l1: Food, l2: Dining}
+  - {keyword: 連加＊連加＊摩斯漢堡, l1: Food, l2: Dining}
+  - {keyword: 連加＊Ｙａｈｏｏ購物中, l1: Shopping, l2: Online}
+  - {keyword: 連加＊漢神巨蛋購物廣場, l1: Shopping, l2: Department}
+  - {keyword: 連加＊ＬａＬａｐｏｒｔ, l1: Shopping, l2: Department}
+  - {keyword: 連加＊ＧｌｏｂａｌＭ, l1: Shopping, l2: Department}
+  - {keyword: 連加＊ＰＡＲＫＩＮＧ, l1: Transport, l2: Parking}
+  - {keyword: 連加＊城市車旅, l1: Transport, l2: PublicTransit}
+  - {keyword: 連加＊威訊ＷａｙＳｉｍ, l1: Entertainment, l2: Travel}
+  - {keyword: 連加＊臺南市美術館, l1: Entertainment, l2: Attractions}
+  - {keyword: 連支＊紅豆食府, l1: Food, l2: Dining}
+  - {keyword: 連支＊相家？（攤位）, l1: Food, l2: Dining}
+  - {keyword: 連支＊陳賣賣手作飯糰, l1: Food, l2: Dining}
+  - {keyword: 連支＊潮味決－台北三民, l1: Food, l2: Dining}
+  - {keyword: 連支＊一品鴨莊︱苓雅店, l1: Food, l2: Dining}
+  - {keyword: 連支＊鄰家小廚, l1: Food, l2: Dining}
+  - {keyword: 連支＊大稻埕魯肉飯, l1: Food, l2: Dining}
+  - {keyword: 連支＊貪吃狗Ｇｒｅｅｄ, l1: Food, l2: Dining}
+  - {keyword: 連支＊鬍鬚張股份有限公, l1: Food, l2: Dining}
+  - {keyword: 連支＊千農廚房, l1: Food, l2: Dining}
+  - {keyword: 連支＊日月亭股份有限公, l1: Food, l2: Dining}
+  - {keyword: 連支＊麻媽家東湖店, l1: Food, l2: Dining}
+  - {keyword: 連支＊呈信鵝肉－永貞店, l1: Food, l2: Dining}
+  - {keyword: 連支＊膳牛堂, l1: Food, l2: Dining}
+  - {keyword: 連支＊１２ＭＩＮＩ台北, l1: Food, l2: Dining}
+  - {keyword: 連支＊酷遊天股份有限公, l1: Entertainment, l2: Travel}
+  - {keyword: 連加＊連加＊Ｇｒｅａｔ, l1: Food, l2: Dining}
+  - {keyword: 萬洲通, l1: Transport, l2: PublicTransit}
+  - {keyword: 采盟股份有限公司精采分, l1: Food, l2: Dining}
+  - {keyword: ＳＫＭＰＡＲＫ, l1: Shopping, l2: Department}
+  - {keyword: 'Nintendo Co., Ltd.', l1: Entertainment, l2: Digital}
+  - {keyword: 松佳ＶＭ, l1: Food, l2: ConvenienceStore}
+  - {keyword: 優食, l1: Food, l2: Delivery}
+  - {keyword: 鬍鬚張, l1: Food, l2: Dining}
+  - {keyword: 好食城商場, l1: Food, l2: Dining}
+  - {keyword: 義美股份有限公司, l1: Food, l2: Groceries}
+  - {keyword: 季緣, l1: Food, l2: Dining}
+  - {keyword: 酷遊天股份有限公司, l1: Entertainment, l2: Travel}
+  - {keyword: 久大文具連鎖, l1: Shopping, l2: Department}
+  - {keyword: 連加＊Ａｅｒｏｂｉｌｅ, l1: Entertainment, l2: Travel}
+  - {keyword: 連支＊衝組, l1: Entertainment, l2: Merchandise}
+  - {keyword: 連支＊ＢＬＩＫＥ高雄店, l1: Food, l2: Dining}
+  - {keyword: 連支＊Ｐｈ？Ｗｉｌｄ, l1: Food, l2: Dining}
+  - {keyword: ＹｉＰａｙ－夕陽音樂產, l1: Entertainment, l2: Merchandise}
+  - {keyword: 'Xsolla*PikminBloom', l1: Entertainment, l2: Digital}
+  - {keyword: 雙月食品社, l1: Food, l2: Dining}
+  - {keyword: SSIYU HANRASIGMAJUM, l1: Food, l2: Dining}
+  - {keyword: ＴｈｅＳｌｉｃｅＳ, l1: Food, l2: Dining}
+  - {keyword: CRR JEONPO BR, l1: Shopping, l2: Department}
+  - {keyword: ONIMARU SANJOKAWARA, l1: Food, l2: Dining}
+  - {keyword: 青山－中山南西店, l1: Food, l2: Dining}
+  - {keyword: POVO CHARGES, l1: Entertainment, l2: Travel}
+  - {keyword: POLLIPAKEUSEOMYEONJ, l1: Shopping, l2: Pet}
+  - {keyword: 連支＊ＬｏｇｏｓＣｏ, l1: Food, l2: Dining}
+  - {keyword: ENJEOILLINEOSEU, l1: Shopping, l2: Department}
+  - {keyword: MAEGAEMZISSIKEOPIBO, l1: Food, l2: Dining}
+  - {keyword: ＃Ｓｐａｃｅ, l1: Transport, l2: Parking}
+  - {keyword: Ｓｃａｎ２Ｐａｙ掃碼通, l1: Transport, l2: PublicTransit}
+  # 以下這幾筆名稱太模糊猜不出來（LINE Pay 前綴＋看不懂的縮寫/亂碼），故意
+  # 留著不分類，好過亂猜：連加＊Ｕｎｉｐａｐａ、連加＊萬魔未來工學院、
+  # 連加＊ＬＩＮＥＰＡＹ＊（像是儲值不是消費）、
+  # 連加＊連加＊特麗樹工坊、連加＊貳虎ＯＦＦＴ
+  # Uncategorized 高頻/高金額商家整理（2026-08-15）
+  - {keyword: "大戶屋", l1: "Food", l2: "Dining"}
+  - {keyword: "吉豚屋", l1: "Food", l2: "Dining"}
+  - {keyword: "麻膳堂", l1: "Food", l2: "Dining"}
+  - {keyword: "岡心食堂", l1: "Food", l2: "Dining"}
+  - {keyword: "老時光燒肉酒肴", l1: "Food", l2: "Dining"}
+  - {keyword: "臺灣鐵路管理局餐旅服務", l1: "Food", l2: "Dining"}
+  - {keyword: "統康生活超市", l1: "Food", l2: "Groceries"}
+  - {keyword: "SEVEN-ELEVEN", l1: "Food", l2: "ConvenienceStore"}
+  - {keyword: "京站時尚廣場", l1: "Shopping", l2: "Department"}
+  - {keyword: "無印良品", l1: "Shopping", l2: "Department"}
+  - {keyword: "燦坤", l1: "Shopping", l2: "Electronics"}
+  - {keyword: "COUPANG", l1: "Shopping", l2: "Online"}
+  - {keyword: "優衣庫", l1: "Shopping", l2: "Apparel"}
+  - {keyword: "博客來", l1: "Education", l2: "Books"}
+  - {keyword: "威秀影城", l1: "Entertainment", l2: "Movies"}
+  - {keyword: "NBA League Pass", l1: "Entertainment", l2: "Streaming"}
+  - {keyword: "活動通", l1: "Entertainment", l2: "Tickets"}
+  - {keyword: "時藝多媒體", l1: "Entertainment", l2: "Tickets"}
+  - {keyword: "GIANTS ONLINE TICKET", l1: "Entertainment", l2: "Tickets"}
+  - {keyword: "POKEMON CENTER", l1: "Entertainment", l2: "Merchandise"}
+  - {keyword: "臺灣鐵路管理局網路購票", l1: "Transport", l2: "PublicTransit"}
+  - {keyword: "Bolt", l1: "Transport", l2: "Taxi"}
+  - {keyword: "退貨手續費", l1: "Other", l2: "Fee"}
+  # JR EAST 通用（車票/交通類）：務必放在上面 JR EAST HOTEL／JR EAST SHOPPING
+  # 之後，不然會攔截本來該分到住宿／購物的那兩條
+  - {keyword: "JR EAST", l1: "Transport", l2: "PublicTransit"}
+  - {keyword: "FLAGS", l1: "Shopping", l2: "Apparel"}
+  # 韓國訂房代理（WHG Korea）幫忙訂日本 Hotel Gracery 房間，卡片顯示消費地
+  # 是韓國，但國泰每日通知的「消費類別」欄位跟 NICEPAY 付款確認信都寫明是訂房
+  - {keyword: "NICE*GRACERY", l1: "Entertainment", l2: "Lodging"}
+  - {keyword: 馬修嚴選—民生門市, l1: Food, l2: Groceries}
+  - {keyword: 新域開發股份有限公司, l1: Shopping, l2: Department}
+  - {keyword: ＤＲＥＡＭＰＬＡＺＡ, l1: Food, l2: Dining}
+  - {keyword: 綠界－美麗華娛樂股份有限公, l1: Entertainment, l2: Movies}
+  - {keyword: ＡＬＣＨＥＭＩＳＴ, l1: Food, l2: Dining}
+  - {keyword: 義美股份有限公司－民權東門市, l1: Food, l2: Groceries}
+  - {keyword: 城市車旅高醫站, l1: Transport, l2: PublicTransit}
+  - {keyword: 馬修嚴選—南京門市, l1: Food, l2: Groceries}
+  - {keyword: ＬａＬａｐｏｒｔ南港, l1: Food, l2: Dining}
+  - {keyword: SANAYAKKOOK, l1: Medical, l2: Care}
+  - {keyword: KEULLAIMSAINDEUBOOSAN, l1: Food, l2: Dining}
+  - {keyword: ZENTIS OSAKA FRONT, l1: Entertainment, l2: Lodging}
+  - {keyword: HOTELCOM73413153337255, l1: Entertainment, l2: Travel}
+  - {keyword: 城市車旅鼓山鼓南站, l1: Transport, l2: PublicTransit}
+  - {keyword: 好食城商場廣一樂廚, l1: Food, l2: Dining}
+  - {keyword: 好食城商場─石研室, l1: Food, l2: Dining}
+  - {keyword: 康是美通河門市, l1: Medical, l2: Care}
+  - {keyword: SP SHOP.OSU.XYZ, l1: Shopping, l2: Department}
+  - {keyword: 都城實業股份有限公司, l1: Food, l2: Dining}
+  - {keyword: 富士豬排－小巨蛋店, l1: Food, l2: Dining}
+  - {keyword: Ｐｏｋｅｗｏｒｋｓ, l1: Food, l2: Dining}
+  - {keyword: 代代木國際精品, l1: Shopping, l2: Department}
+  - {keyword: ＣｏＣｏ一番屋南京店, l1: Food, l2: Dining}
+  - {keyword: 城市車旅高雄榮總, l1: Transport, l2: PublicTransit}
+  - {keyword: 城市車旅格友本館站, l1: Transport, l2: PublicTransit}
+  - {keyword: ＡＴＴ ４ ＦＵＮ, l1: Shopping, l2: Department}
+  - {keyword: ｇｉｎｍｉｎｄ, l1: Food, l2: ''}
+  - {keyword: ＨＩＢＯＲＵ, l1: Food, l2: ''}
+  - {keyword: WORLDSHOPPING.GLOBAL, l1: Shopping, l2: ''}
+  - {keyword: 樂粄米敦北門市, l1: Food, l2: ''}
+  - {keyword: 連加＊早安有喜－高雄和, l1: Food, l2: ''}
+  - {keyword: 抓福股份有限公司, l1: Food, l2: ''}
+  - {keyword: ＯｉｅＴａｉｐｅｉ, l1: Food, l2: ''}
+  - {keyword: THE PAPER BUNNY, l1: Shopping, l2: ''}
+  - {keyword: 聖姬那若有限公司, l1: Food, l2: Dining}
+  - {keyword: 非瓶有限公司, l1: Food, l2: Dining}
+  - {keyword: 街口收銀－Ｅ７ＰＬＡＹ, l1: Entertainment, l2: ''}
+  - {keyword: BANOBAGIEUWON BOOSA130101, l1: Medical, l2: ''}
+  - {keyword: 街口收銀, l1: Shopping, l2: Department}
+  # Uncategorized 高頻/高金額商家整理（2026-08-16，reconcile 後剩餘的長尾）
+  - {keyword: 屈臣氏, l1: Shopping, l2: Drugstore}
+  - {keyword: 真芳碳烤, l1: Food, l2: Dining}
+  - {keyword: ＣＡＦＥ！Ｎ, l1: Food, l2: Dining}
+  - {keyword: ＣＡＦＥＩＮ, l1: Food, l2: Dining}
+  - {keyword: Ａｕｎｔｉｅａｎｎｅ, l1: Food, l2: Dining}
+  - {keyword: 義美吉盛, l1: Food, l2: Groceries}
+  - {keyword: ＬＯＵＩＳＡＣＯＦＦ, l1: Food, l2: Dining}
+  - {keyword: 紅花麻辣鹽水雞, l1: Food, l2: Dining}
+  - {keyword: DAIMARU TOKYO, l1: Shopping, l2: Department}
+  - {keyword: STARBUCKS COFFEE JAPAN, l1: Food, l2: Dining}
+  - {keyword: MOXY, l1: Entertainment, l2: Lodging}
+  - {keyword: SSIYU(CU), l1: Food, l2: ConvenienceStore}
+  - {keyword: Refund Globalblue.com, l1: Other, l2: Refund}
+  - {keyword: ＯａｓｉｓＣｏｆｆｅ, l1: Food, l2: Dining}
+  - {keyword: OFFICIAL GOODS STORE, l1: Entertainment, l2: Merchandise}
+  - {keyword: 全網行銷股份有限公司, l1: Entertainment, l2: Tickets}
+  - {keyword: ＣｏｐｐｉｉＬｕｍｉ, l1: Food, l2: Dining}
+  - {keyword: 'KICC*HAEWOONDAE_BLU', l1: Entertainment, l2: Attractions}
+  - {keyword: SSIYU JOONGGOOHAESUNGJ, l1: Food, l2: ConvenienceStore}
+  - {keyword: ＳＣＨＵＭＡＮＮＳＢ, l1: Food, l2: Dining}
+  - {keyword: NUMBERSUGAR DAIKANYAMATEN, l1: Food, l2: Dining}
+  - {keyword: 'SQ*NADOYA NO KATTE', l1: Food, l2: Dining}
+  - {keyword: Ｋ區東森廣場, l1: Food, l2: Dining}
+  - {keyword: 連支＊ＧｒｅａｔＦｏ, l1: Food, l2: Dining}
+  - {keyword: ＺｉｐａｎｇＣｕｒｒ, l1: Food, l2: Dining}
+  # CTBC（中國信託）手動匯出 CSV 補分類（2026-08-17）
+  - {keyword: "RESIDENCE INN", l1: Entertainment, l2: Lodging}
+  - {keyword: "Nintendo", l1: Entertainment, l2: Digital}
+  - {keyword: "PlayStation Network", l1: Entertainment, l2: Digital}
+  - {keyword: "逾期還款違約金", l1: Other, l2: Fee}
+  - {keyword: 呈信鵝肉, l1: Food, l2: Dining}
+  - {keyword: 連支＊玖柒番, l1: Food, l2: Dining}
+  - {keyword: 連支＊築本屋, l1: Food, l2: Dining}
+  - {keyword: 連支＊金沐子, l1: Food, l2: Dining}
+  - {keyword: 連支＊相家？, l1: Food, l2: Dining}
+  - {keyword: ５０嵐, l1: Food, l2: Dining}
+  # 猜測性分類，商家名稱被 CTBC CSV 截斷（"連支＊８０．８２　Ｂａ..."），無法確認實際店名，先歸飲食待確認
+  - {keyword: 連支＊８０．８２, l1: Food, l2: Dining}
+  # 2026-09 國泰月結單進來後剩餘的 Uncategorized（2026-09-17）
+  - {keyword: 萊爾富, l1: Food, l2: ConvenienceStore}
+  - {keyword: 富胖達, l1: Food, l2: Delivery}          # foodpanda 中文請款名
+  - {keyword: 烏弄, l1: Food, l2: Dining}
+  - {keyword: 安心食品服務, l1: Food, l2: Dining}       # 摩斯漢堡母公司
+  - {keyword: 港都熱炒, l1: Food, l2: Dining}

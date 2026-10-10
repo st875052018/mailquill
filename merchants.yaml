@@ -1,0 +1,81 @@
+# 商家顯示名稱別名：keyword 出現在銀行原始商家字串（merchant_raw）內，就把
+# 顯示名稱（merchant_norm）改成 name。比對不分大小寫/全半形，由上而下取第一個命中。
+# 加 replace: true 則只替換名稱裡的 keyword、保留其餘部分（如店名）。
+# 只影響顯示；分類仍看 categories.yaml。改完跑 `mailquill rebuild` 生效。
+aliases:
+  # 交通
+  - {keyword: "高鐵智慧型手機", name: "高鐵（App 購票）"}
+  - {keyword: "eTag臨停", name: "eTag 臨停停車費"}
+  - {keyword: "eTag", name: "eTag 國道通行費"}
+  - {keyword: "MOBILE SUICA", name: "Suica 儲值（Apple Pay）"}
+  - {keyword: "MOBILESUICA", name: "Suica 儲值（Apple Pay）"}
+  - {keyword: "SUICA KEITAIKESSAI", name: "Suica 手機支付"}
+  - {keyword: "UBER ONE", name: "Uber One 會員"}
+  - {keyword: "UBER TRIP", name: "Uber 叫車"}
+  - {keyword: "UBER *TRIP", name: "Uber 叫車"}
+  - {keyword: "LINEGO", name: "LINE GO 叫車"}
+  - {keyword: "CHARGESPOT", name: "ChargeSPOT 行動電源租借"}
+  # 訂閱 / 數位服務
+  - {keyword: "APPLE.COM/BILL", name: "Apple 訂閱（App Store / iCloud）"}
+  - {keyword: "ANTHROPIC", name: "Anthropic（Claude）"}
+  - {keyword: "DAZN", name: "DAZN 體育串流"}
+  - {keyword: "SM.NORD", name: "NordVPN"}
+  - {keyword: "AMAZON PRIME", name: "Amazon Prime 會員"}
+  - {keyword: "TELLO", name: "Tello eSIM（美國）"}
+  - {keyword: "POVO CHARGES", name: "povo 日本手機儲值"}
+  # 購物 / 票務
+  - {keyword: "富邦momo", name: "momo 購物網"}
+  - {keyword: "家Suk", name: "Foodpanda-すき家 Sukiya"}  # 原始資料「すき」變成 ??
+  - {keyword: "富胖達", name: "Foodpanda", replace: true}
+  - {keyword: "PCHOME", name: "PChome 線上購物"}
+  - {keyword: "安源資訊", name: "ibon（7-11 購票/繳費）"}
+  - {keyword: "TICKET BOARD", name: "Ticket Board（日本購票）"}
+  - {keyword: "DONDONDON", name: "DON DON DONKI（唐吉訶德）"}
+  - {keyword: "JR EAST SHOPPING", name: "JR 東日本車站商場"}
+  - {keyword: "JREASTSHOPPING", name: "JR 東日本車站商場"}
+  - {keyword: "TOKYO ICHIBANGAI", name: "東京車站一番街"}
+  - {keyword: "Globalblue", name: "Global Blue 退稅"}
+  # 旅遊 / 住宿
+  - {keyword: "FUKUTAKE FOUNDATION", name: "福武財團（直島/瀨戶內藝術）"}
+  - {keyword: "CANDLEWOOD", name: "Candlewood Suites（拉斯維加斯）"}
+  - {keyword: "COURTYARD", name: "Courtyard by Marriott 萬怡酒店"}
+  # 日本（滙豐 OCR 常黏字/錯字，keyword 取穩定片段）
+  - {keyword: "AMAZON:-CO-JP", name: "Amazon 日本"}
+  - {keyword: "AMAZON.CO.JP", name: "Amazon 日本"}
+  - {keyword: "JREASTHOTELS", name: "JR 東日本飯店"}
+  - {keyword: "JR EAST HOTELS", name: "JR 東日本飯店"}
+  - {keyword: "NANAMI", name: "nanamica 代官山"}
+  - {keyword: "BICCAMERA", name: "Bic Camera"}
+  - {keyword: "BITCCAMERA", name: "Bic Camera"}
+  - {keyword: "LARTISANPARFUMEUR", name: "L'Artisan Parfumeur 香水"}
+  - {keyword: "ROPPONGIHILLS", name: "六本木之丘"}
+  - {keyword: "MUJTIRUSHI", name: "無印良品"}
+  - {keyword: "MUJIRUSHI", name: "無印良品"}
+  - {keyword: "CO0SAOYAMA", name: "COS 青山"}
+  - {keyword: "DONQU", name: "唐吉訶德"}
+  - {keyword: "DONGQU", name: "唐吉訶德"}
+  - {keyword: "TNF/N", name: "The North Face"}
+  - {keyword: "KAITENSUSHINUMAZU", name: "沼津港迴轉壽司"}
+  - {keyword: "TOKYUSTORE", name: "東急超市"}
+  - {keyword: "FREAKSSTORE", name: "FREAK'S STORE"}
+  - {keyword: "SHIBUYALOFT", name: "LOFT 澀谷"}
+  - {keyword: "IKEBUKUROLOFT", name: "LOFT 池袋"}
+  - {keyword: "SUSHIRO", name: "壽司郎"}
+  - {keyword: "FAMILYMART", name: "FamilyMart 全家（日本）"}
+  - {keyword: "LAWSON", name: "Lawson 羅森"}
+  - {keyword: "HANEDAKUUKOU", name: "羽田機場"}
+  - {keyword: "ISETAN", name: "伊勢丹"}
+  - {keyword: "LIFECORPORAT", name: "LIFE 超市"}
+  - {keyword: "STARBUCKS", name: "星巴克"}
+  - {keyword: "BLUEBOTTL", name: "Blue Bottle Coffee"}
+  - {keyword: "DISNEYSTORE", name: "Disney Store"}
+  - {keyword: "GOTANDATOKYU", name: "五反田東急"}
+  - {keyword: "ONIBUSCOF", name: "ONIBUS COFFEE"}
+  - {keyword: "BALATONCAFE", name: "Balaton Café"}  # 滙豐 OCR：BALATONCAFEO
+  - {keyword: "NEGISHI", name: "ねぎし 牛舌（新宿）"}
+  - {keyword: "GYUKATSUKYOTOKATSU", name: "京都勝牛"}
+  - {keyword: "CPITIZZA", name: "400℃ Pizza"}  # 滙豐 OCR：40O0CPITIZZASHLI
+  - {keyword: "3COINS+PLUS", name: "3COINS+PLUS"}
+  - {keyword: "3COINS", name: "3COINS"}
+  - {keyword: "DRAFTSHARKS", name: "DRAFTSHARKS"}
+  - {keyword: "中華電信", name: "中華電信"}
