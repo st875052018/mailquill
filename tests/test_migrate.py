@@ -11,15 +11,18 @@ from mailquill.schema import Transaction, make_txn_id
 
 
 def _txn(merchant, *, date="2026-06-01", amount="100", seq="", txn_id=None,
-         msg_id="m1", imported_at="2026-06-29T15:52:20", bank="Cathay",
-         last4="6224"):
-    """造一筆交易；txn_id 不給時用現行公式（含 seq）算。"""
+         id_seq=None, msg_id="m1", imported_at="2026-06-29T15:52:20",
+         bank="Cathay", last4="6224"):
+    """造一筆交易；txn_id 不給時用現行公式算。
+
+    `seq` 是存進欄位的值，`id_seq` 是拿來算 id 的 seq（不給就等於 seq）；
+    兩者分開才造得出「欄位沒存 seq、id 卻是用 seq=5 算的」這類列。"""
     if txn_id is None:
         txn_id = make_txn_id(bank, last4, date, amount, merchant,
-                             int(seq or 0))
+                             int(seq or 0) if id_seq is None else id_seq)
     return Transaction(
         txn_id=txn_id, date=date, post_date="", amount=amount, currency="TWD",
-        merchant_raw=merchant, merchant_norm=merchant, category_l1="未分類",
+        merchant_raw=merchant, merchant_norm=merchant, category_l1="Uncategorized",
         category_l2="", bank=bank, account_last4=last4, source_type="pdf",
         source_msg_id=msg_id, raw_ref=msg_id, imported_at=imported_at, seq=seq,
     )
@@ -82,16 +85,6 @@ def test_migration_is_idempotent():
     assert [t.txn_id for t in twice.txns] == [t.txn_id for t in once.txns]
 
 
-def test_unexplained_row_is_reported_and_left_untouched():
-    """id 既非舊公式、也無法用位置重現新式公式的列，不動它，只回報。"""
-    weird = _txn("A", txn_id="deadbeefdeadbeef")
-    plan = plan_migration([weird])
-    assert [t.txn_id for t in plan.unexplained] == ["deadbeefdeadbeef"]
-    assert plan.txns[0].txn_id == "deadbeefdeadbeef"
-    assert plan.txns[0].seq == "", "無法歸類的列不應被填入猜測的 seq"
-    assert plan.changed == 0
-
-
 def test_seq_is_scoped_per_message_and_import():
     """seq 是「同一封信、同一次匯入」內的序號，不是全表流水號。"""
     plan = plan_migration([
@@ -116,8 +109,7 @@ def test_row_with_stored_seq_matching_its_id_is_already_current_even_if_position
 def test_seq_is_recovered_from_the_id_when_position_in_group_does_not_match():
     # 同一份帳單分兩批寫進 CSV、或同封信的前面幾筆被對帳合併掉：這列在群組內的位置是 0，
     # 但 id 其實是用 seq=5 算的。id 是現行公式的雜湊，直接試出 seq 比用位置猜可靠。
-    row = _txn("A", seq="5")                 # id 由 seq=5 算出
-    row = Transaction(**{**row.__dict__, "seq": ""})   # 模擬 CSV 沒存 seq
+    row = _txn("A", id_seq=5)                # id 由 seq=5 算出，欄位沒存 seq
     plan = plan_migration([row])
     assert plan.unexplained == []
     assert plan.changed == 0
@@ -125,7 +117,40 @@ def test_seq_is_recovered_from_the_id_when_position_in_group_does_not_match():
     assert plan.txns[0].seq == "5"
 
 
-def test_row_whose_id_matches_no_known_formula_stays_unexplained():
+def test_row_whose_id_matches_no_known_formula_is_reported_and_left_untouched():
+    """id 既非舊公式、也無法用位置或雜湊重現現行公式的列，不動它，只回報。"""
     bogus = _txn("A", txn_id="deadbeefdeadbeef")
     plan = plan_migration([bogus])
     assert plan.unexplained == [bogus]
+    assert plan.txns == [bogus]
+    assert plan.txns[0].seq == "", "無法歸類的列不應被填入猜測的 seq"
+    assert plan.changed == 0
+
+
+def test_non_numeric_or_mismatched_stored_seq_does_not_crash_and_is_recovered():
+    # 欄位裡的 seq 壞掉（非數字）或跟 id 對不上時，不能拿來信任也不能丟例外；
+    # id 本身仍是現行公式，從雜湊試出真正的 seq。
+    junk = _txn("A", seq="abc", id_seq=2)
+    wrong = _txn("B", seq="9", id_seq=1)
+    plan = plan_migration([junk, wrong])
+    assert plan.unexplained == []
+    assert [t.seq for t in plan.txns] == ["2", "1"]
+    assert [t.txn_id for t in plan.txns] == [junk.txn_id, wrong.txn_id]
+
+
+def test_seq_beyond_search_limit_stays_unexplained():
+    from mailquill.migrate import MAX_SEQ_SEARCH
+    far = _txn("A", id_seq=MAX_SEQ_SEARCH + 1)
+    plan = plan_migration([far])
+    assert plan.unexplained == [far]
+
+
+def test_unexplained_rows_are_never_deduped_against_normal_rows():
+    normal = _txn("A", seq="0")
+    twin = _txn("A", seq="0", txn_id=normal.txn_id)   # 同 id 的另一列照樣算正常、會被收斂
+    weird = _txn("A", txn_id="deadbeefdeadbeef")
+    weird2 = _txn("A", txn_id="deadbeefdeadbeef")      # 兩筆一樣的怪 id 也都保留
+    plan = plan_migration([normal, twin, weird, weird2])
+    assert len(plan.removed) == 1
+    assert plan.unexplained == [weird, weird2]
+    assert len(plan.txns) == 3
