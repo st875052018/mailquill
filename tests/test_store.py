@@ -1,7 +1,10 @@
 import sqlite3
 
 from mailquill.schema import Transaction, make_txn_id, FIELDS
-from mailquill.store import read_transactions, append_transactions, rebuild_sqlite
+from mailquill.store import (
+    read_transactions, append_transactions, rebuild_sqlite, reconcile,
+    read_seen_ids, write_seen_ids,
+)
 
 
 def _txn(merchant, amount="100.00"):
@@ -9,7 +12,7 @@ def _txn(merchant, amount="100.00"):
     return Transaction(
         txn_id=tid, date="2026-06-01", post_date="", amount=amount,
         currency="TWD", merchant_raw=merchant, merchant_norm="",
-        category_l1="未分類", category_l2="", bank="Cathay",
+        category_l1="Uncategorized", category_l2="", bank="Cathay",
         account_last4="1234", source_type="email_body",
         source_msg_id="m1", raw_ref="", imported_at="2026-06-24T00:00:00",
     )
@@ -17,6 +20,23 @@ def _txn(merchant, amount="100.00"):
 
 def test_read_missing_file_returns_empty(tmp_path):
     assert read_transactions(str(tmp_path / "none.csv")) == []
+
+
+def test_read_seen_ids_missing_file_returns_empty_set(tmp_path):
+    assert read_seen_ids(str(tmp_path / "none.txt")) == set()
+
+
+def test_write_then_read_seen_ids_roundtrip(tmp_path):
+    path = str(tmp_path / "seen.txt")
+    write_seen_ids(path, {"m1", "m2", "m3"})
+    assert read_seen_ids(path) == {"m1", "m2", "m3"}
+
+
+def test_write_seen_ids_overwrites_previous_contents(tmp_path):
+    path = str(tmp_path / "seen.txt")
+    write_seen_ids(path, {"m1"})
+    write_seen_ids(path, {"m2"})
+    assert read_seen_ids(path) == {"m2"}
 
 
 def test_append_then_read_roundtrip(tmp_path):
@@ -67,6 +87,47 @@ def test_rebuild_sqlite_loads_all_rows(tmp_path):
         conn.close()
 
 
+def test_reconcile_merges_daily_notice_into_matching_statement_row(tmp_path):
+    csv_path = str(tmp_path / "t.csv")
+    db_path = str(tmp_path / "t.db")
+    email_txn = _txn("", amount="100.00")  # 每日通知：商店名稱空白
+    pdf_txn = Transaction(
+        txn_id=make_txn_id("Cathay", "1234", "2026-06-01", "100.00", "全聯"),
+        date="2026-06-01", post_date="", amount="100.00", currency="TWD",
+        merchant_raw="全聯", merchant_norm="全聯", category_l1="Uncategorized", category_l2="",
+        bank="Cathay", account_last4="1234", source_type="pdf",
+        source_msg_id="stmt1", raw_ref="", imported_at="2026-06-24T00:00:00",
+    )
+    append_transactions(csv_path, [email_txn, pdf_txn])
+    rebuild_sqlite(csv_path, db_path)
+
+    result = reconcile(csv_path, db_path)
+    assert (result.merged, result.ambiguous) == (1, 0)
+
+    rows = read_transactions(csv_path)
+    assert len(rows) == 1
+    assert rows[0].merchant_raw == "全聯"
+    assert rows[0].source_type == "pdf"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        assert count == 1
+    finally:
+        conn.close()
+
+
+def test_reconcile_no_matches_leaves_csv_untouched(tmp_path):
+    csv_path = str(tmp_path / "t.csv")
+    db_path = str(tmp_path / "t.db")
+    append_transactions(csv_path, [_txn("全聯")])
+    rebuild_sqlite(csv_path, db_path)
+
+    result = reconcile(csv_path, db_path)
+    assert (result.merged, result.ambiguous) == (0, 0)
+    assert len(read_transactions(csv_path)) == 1
+
+
 def test_rebuild_sqlite_is_idempotent(tmp_path):
     csv_path = str(tmp_path / "t.csv")
     db_path = str(tmp_path / "t.db")
@@ -80,3 +141,38 @@ def test_rebuild_sqlite_is_idempotent(tmp_path):
         assert count == 1
     finally:
         conn.close()
+
+
+def test_rebuild_links_foreign_fee_and_categorizes_as_fee(tmp_path):
+    from mailquill.store import rebuild
+    csv_path = str(tmp_path / "t.csv")
+    cats = tmp_path / "categories.yaml"
+    cats.write_text('rules:\n  - {keyword: "MOBILE", l1: "Transport", l2: "Suica"}\n', encoding="utf-8")
+    append_transactions(csv_path, [_txn("MOBILE SUICA APPLE V", "3998"),
+                                   _txn("國外交易手續費 -MOBILE", "60")])
+    rebuild(csv_path, str(tmp_path / "t.db"), str(cats))
+    fee = next(t for t in read_transactions(csv_path) if t.merchant_raw.startswith("國外"))
+    assert (fee.category_l1, fee.category_l2) == ("Other", "Fee")
+    assert fee.merchant_norm == "國外手續費 · MOBILE SUICA APPLE V"
+
+
+def test_rekey_csv_rows_uses_occurrence_index_not_row_position(tmp_path):
+    from dataclasses import replace
+    from mailquill.store import rekey_csv_rows, write_transactions_atomic
+    path = str(tmp_path / "t.csv")
+
+    def csv_txn(merchant, seq):  # 舊算法：seq = 該列在檔案中的位置
+        t = _txn(merchant)
+        return replace(t, source_type="csv", bank="Amex", account_last4="9",
+                       txn_id=make_txn_id("Amex", "9", "2026-06-01", "100.00", merchant, seq))
+    pdf_row = _txn("PDFSHOP")
+    write_transactions_atomic(path, [csv_txn("A", 0), csv_txn("B", 1), csv_txn("A", 2), pdf_row])
+
+    assert rekey_csv_rows(path) == 2  # 第一個 A 舊 seq 本來就是 0
+    rows = read_transactions(path)
+    ids = {(r.merchant_raw, i): r.txn_id for i, r in enumerate(rows)}
+    assert ids[("A", 0)] == make_txn_id("Amex", "9", "2026-06-01", "100.00", "A", 0)
+    assert ids[("B", 1)] == make_txn_id("Amex", "9", "2026-06-01", "100.00", "B", 0)
+    assert ids[("A", 2)] == make_txn_id("Amex", "9", "2026-06-01", "100.00", "A", 1)
+    assert rows[3].txn_id == pdf_row.txn_id          # 非 csv 來源不動
+    assert rekey_csv_rows(path) == 0                  # 冪等
