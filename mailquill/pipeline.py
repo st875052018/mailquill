@@ -20,7 +20,7 @@ from mailquill.categorizer import load_categories, apply_categories
 from mailquill.merchant_names import aliases_path_for, apply_display_names, load_aliases
 from mailquill.store import (
     append_transactions, rebuild_sqlite, read_transactions,
-    read_seen_ids, read_retry_ids, read_unparsed_ids, write_seen_ids,
+    read_registry, write_seen_ids,
 )
 from mailquill.bills_store import append_bills
 
@@ -73,9 +73,10 @@ def run_pipeline(service, cfg: Config, imported_at: str,
     # 「這次不要拿它來跳過重抓」，寫回時仍要跟舊記錄合併，不能整份覆蓋掉。
     # 上次只處理到一半的信（PDF 解不開、抽字失敗）即使本文那幾筆已經在 CSV
     # 裡，也要排除在「已處理」之外，補上密碼／環境後才能重跑補回。
-    existing_registry_ids = read_seen_ids(cfg.seen_ids_path)
-    existing_retry_ids = read_retry_ids(cfg.seen_ids_path)
-    existing_unparsed = read_unparsed_ids(cfg.seen_ids_path)
+    registry = read_registry(cfg.seen_ids_path)
+    existing_registry_ids = registry.seen
+    existing_retry_ids = registry.retry
+    existing_unparsed = registry.unparsed
     fingerprint = parser_fingerprint()
     # parser 當時解不出東西、且 parser 之後沒改過的信，重抓也只會得到一樣的結果
     unchanged_unparsed = {m for m, fp in existing_unparsed.items() if fp == fingerprint}

@@ -39,22 +39,19 @@ def count_legacy_id_rows(csv_path: str) -> int:
 
 
 def append_transactions(csv_path: str, txns: list[Transaction]) -> AppendResult:
-    existing_ids = {t.txn_id for t in read_transactions(csv_path)}
-    file_exists = os.path.exists(csv_path)
-    added = skipped = 0
-    batch_ids: set[str] = set()
-    with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDS)
-        if not file_exists:
-            writer.writeheader()
-        for txn in txns:
-            if txn.txn_id in existing_ids or txn.txn_id in batch_ids:
-                skipped += 1
-                continue
-            writer.writerow(txn.to_row())
-            batch_ids.add(txn.txn_id)
-            added += 1
-    return AppendResult(added=added, skipped=skipped)
+    """把新交易併進 CSV（以 txn_id 去重）。整份先寫暫存檔再 rename，
+    中途中斷或原檔結尾缺換行都不會弄壞既有資料；沒有新增時不碰檔案。"""
+    existing = read_transactions(csv_path)
+    seen = {t.txn_id for t in existing}
+    fresh: list[Transaction] = []
+    for txn in txns:
+        if txn.txn_id in seen:
+            continue
+        seen.add(txn.txn_id)
+        fresh.append(txn)
+    if fresh or not os.path.exists(csv_path):
+        write_transactions_atomic(csv_path, existing + fresh)
+    return AppendResult(added=len(fresh), skipped=len(txns) - len(fresh))
 
 
 _RETRY_PREFIX = "!"
@@ -68,21 +65,35 @@ def _read_registry_lines(path: str) -> list[str]:
         return [line.strip() for line in f if line.strip()]
 
 
+@dataclass
+class Registry:
+    seen: set[str]             # 已完整處理過的信件 msg_id
+    retry: set[str]            # 處理到一半、下次 run 仍要重抓
+    unparsed: dict[str, str]   # {msg_id: parser 指紋}，parser 當時解不出交易
+
+
+def read_registry(path: str) -> Registry:
+    """一次讀完 seen-id 檔的三種行：`id`（已處理）、`!id`（需重試）、
+    `?id:指紋`（parser 當時解不出交易，指紋變了才重試）。"""
+    reg = Registry(set(), set(), {})
+    for ln in _read_registry_lines(path):
+        if ln.startswith(_RETRY_PREFIX):
+            reg.retry.add(ln[len(_RETRY_PREFIX):])
+        elif ln.startswith(_UNPARSED_PREFIX):
+            if ":" in ln:
+                msg_id, _, fp = ln[len(_UNPARSED_PREFIX):].rpartition(":")
+                reg.unparsed[msg_id] = fp
+        else:
+            reg.seen.add(ln)
+    return reg
+
+
 def read_seen_ids(path: str) -> set[str]:
     """讀取「已完整處理過的信件 msg_id」清單。獨立於 transactions.csv 之外
     持久保存，這樣 `reconcile` 把重複的那筆交易列丟掉後，CSV 裡雖然不再有
     對應的 source_msg_id，`run` 也不會誤判成新信重抓一次（見 pipeline.py）。
-    `!` 開頭的行是「需重試」標記（見 read_retry_ids），不算已處理。
     """
-    return {ln for ln in _read_registry_lines(path)
-            if not ln.startswith((_RETRY_PREFIX, _UNPARSED_PREFIX))}
-
-
-def read_retry_ids(path: str) -> set[str]:
-    """讀取「處理到一半（如 PDF 解不開）、不能靠 CSV 裡已有的列就當成已處理」
-    的信件 msg_id。就算本文那幾筆已入帳，這些信下次 run 仍要重抓。"""
-    return {ln[len(_RETRY_PREFIX):] for ln in _read_registry_lines(path)
-            if ln.startswith(_RETRY_PREFIX)}
+    return read_registry(path).seen
 
 
 @contextmanager
@@ -98,17 +109,6 @@ def atomic_open(path: str, newline: str | None = None):
         if os.path.exists(tmp):
             os.remove(tmp)
         raise
-
-
-def read_unparsed_ids(path: str) -> dict[str, str]:
-    """讀取「parser 當時解不出任何交易」的信件 {msg_id: parser 指紋}。指紋跟
-    現在的 parser 一樣就不必每次 run 都重抓；parser 程式碼一改就自動重試。"""
-    out: dict[str, str] = {}
-    for ln in _read_registry_lines(path):
-        if ln.startswith(_UNPARSED_PREFIX) and ":" in ln:
-            msg_id, _, fp = ln[len(_UNPARSED_PREFIX):].rpartition(":")
-            out[msg_id] = fp
-    return out
 
 
 def write_seen_ids(path: str, ids: set[str], retry: set[str] | frozenset = frozenset(),
@@ -131,13 +131,17 @@ def write_transactions_atomic(csv_path: str, txns: list[Transaction]) -> None:
             writer.writerow(t.to_row())
 
 
-def _rekey_csv_txns(txns: list[Transaction]) -> tuple[list[Transaction], int]:
+def rekey_txns(txns: list[Transaction]) -> tuple[list[Transaction], int]:
     """CSV 匯入的列改用「同日同店同額第幾次出現」當 seq 重算 txn_id。
 
     舊版用列在檔案中的位置當 seq，兩份日期範圍重疊的匯出檔會算出不同
     txn_id 而重複入帳；新版（見 ingest.py）改成出現次序，這裡把舊資料轉成
     同一套編號，並把 seq 存進 CSV（migrate-ids 靠它認得這些列已是現行公式）。
     冪等：已是新編號的列不會再變。
+
+    出現次序取決於列在 `txns` 裡的順序：傳入單一檔案的內容（ingest）或整份 CSV
+    （rekey_csv_rows）都可以，但別手動刪掉兩筆相同 csv 交易中的一筆之後再整份
+    重算，後面那筆的 seq 會前移、txn_id 跟著變，之後重匯同一份檔案會重複入帳。
     """
     occurrences: Counter = Counter()
     out: list[Transaction] = []
@@ -158,8 +162,8 @@ def _rekey_csv_txns(txns: list[Transaction]) -> tuple[list[Transaction], int]:
 
 
 def rekey_csv_rows(csv_path: str) -> int:
-    """對 transactions.csv 做 `_rekey_csv_txns` 並寫回，回傳改了幾列。"""
-    txns, changed = _rekey_csv_txns(read_transactions(csv_path))
+    """對 transactions.csv 做 `rekey_txns` 並寫回，回傳改了幾列。"""
+    txns, changed = rekey_txns(read_transactions(csv_path))
     if changed:
         write_transactions_atomic(csv_path, txns)
     return changed
@@ -170,8 +174,8 @@ def rebuild(csv_path: str, db_path: str, categories_path: str) -> int:
     「所有」交易 → 寫回 CSV → 重建 SQLite。"""
     rules = load_categories(categories_path)
     aliases = load_aliases(aliases_path_for(categories_path))
-    rekeyed, _ = _rekey_csv_txns(read_transactions(csv_path))
-    txns = apply_display_names([apply_categories(t, rules) for t in rekeyed], aliases)
+    txns = apply_display_names(
+        [apply_categories(t, rules) for t in read_transactions(csv_path)], aliases)
     write_transactions_atomic(csv_path, txns)
     rebuild_sqlite(csv_path, db_path, txns=txns)
     return len(txns)
@@ -191,31 +195,40 @@ def reconcile(csv_path: str, db_path: str) -> ReconcileResult:
 def rebuild_sqlite(csv_path: str, db_path: str, txns: list[Transaction] | None = None) -> int:
     """重建 SQLite；`txns` 給的話直接用（呼叫端剛寫完同樣內容的 CSV，避免
     再讀一次剛寫出的檔案），否則照常從 `csv_path` 讀。
+
+    先建在暫存檔、成功才 rename 蓋過舊 DB，中途出錯舊 DB 仍可用（`serve` 同時
+    在讀也不會看到空表）。
     """
     if txns is None:
         txns = read_transactions(csv_path)
-    conn = sqlite3.connect(db_path)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(db_path)), suffix=".tmp")
+    os.close(fd)
     try:
-        conn.execute("DROP TABLE IF EXISTS transactions")
-        col_defs = ", ".join(
-            f"{name} REAL" if name == "amount" else f"{name} TEXT"
-            for name in FIELDS
-        )
-        conn.execute(f"CREATE TABLE transactions ({col_defs})")
-        placeholders = ", ".join("?" for _ in FIELDS)
-        rows = []
-        for t in txns:
-            row = t.to_row()
-            values = [
-                float(row[name]) if name == "amount" and row[name] != "" else row[name]
+        conn = sqlite3.connect(tmp)
+        try:
+            col_defs = ", ".join(
+                f"{name} REAL" if name == "amount" else f"{name} TEXT"
                 for name in FIELDS
-            ]
-            rows.append(values)
-        conn.executemany(
-            f"INSERT INTO transactions ({', '.join(FIELDS)}) VALUES ({placeholders})",
-            rows,
-        )
-        conn.commit()
-    finally:
-        conn.close()
+            )
+            conn.execute(f"CREATE TABLE transactions ({col_defs})")
+            placeholders = ", ".join("?" for _ in FIELDS)
+            rows = []
+            for t in txns:
+                row = t.to_row()
+                rows.append([
+                    float(row[name]) if name == "amount" and row[name] != "" else row[name]
+                    for name in FIELDS
+                ])
+            conn.executemany(
+                f"INSERT INTO transactions ({', '.join(FIELDS)}) VALUES ({placeholders})",
+                rows,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        os.replace(tmp, db_path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
     return len(txns)

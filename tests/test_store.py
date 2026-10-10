@@ -177,3 +177,83 @@ def test_rekey_csv_rows_uses_occurrence_index_not_row_position(tmp_path):
     assert [r.seq for r in rows[:3]] == ["0", "0", "1"]   # seq 一併存進 CSV，migrate-ids 才認得
     assert rows[3].txn_id == pdf_row.txn_id and rows[3].seq == ""   # 非 csv 來源不動
     assert rekey_csv_rows(path) == 0                  # 冪等
+
+
+def test_rekey_txns_is_public_and_pure():
+    from dataclasses import replace
+    from mailquill.store import rekey_txns
+    a = replace(_txn("A"), source_type="csv")
+    out, changed = rekey_txns([a, replace(a), _txn("PDF")])
+    assert changed == 2                                  # 第一個 A 補 seq、第二個 A 改 id
+    assert [t.seq for t in out[:2]] == ["0", "1"]
+    assert out[0].txn_id != out[1].txn_id
+    assert out[2].seq == ""                              # 非 csv 來源不動
+
+
+def test_append_survives_file_without_trailing_newline(tmp_path):
+    path = str(tmp_path / "t.csv")
+    append_transactions(path, [_txn("A")])
+    raw = open(path, encoding="utf-8", newline="").read().rstrip("\r\n")
+    open(path, "w", encoding="utf-8", newline="").write(raw)   # 模擬結尾被截掉換行
+    res = append_transactions(path, [_txn("B")])
+    assert res.added == 1
+    assert [t.merchant_raw for t in read_transactions(path)] == ["A", "B"]
+
+
+def test_append_leaves_file_untouched_when_nothing_new(tmp_path):
+    path = str(tmp_path / "t.csv")
+    append_transactions(path, [_txn("A")])
+    before = open(path, "rb").read()
+    res = append_transactions(path, [_txn("A")])
+    assert (res.added, res.skipped) == (0, 1)
+    assert open(path, "rb").read() == before
+
+
+def test_append_failure_keeps_original_file(tmp_path, monkeypatch):
+    import mailquill.store as store_mod
+    path = str(tmp_path / "t.csv")
+    append_transactions(path, [_txn("A")])
+    before = open(path, "rb").read()
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(store_mod.os, "replace", boom)
+    try:
+        append_transactions(path, [_txn("B")])
+    except OSError:
+        pass
+    assert open(path, "rb").read() == before
+    assert [p.name for p in tmp_path.iterdir()] == ["t.csv"]   # 暫存檔已清掉
+
+
+def test_read_registry_parses_all_three_line_kinds_in_one_pass(tmp_path):
+    from mailquill.store import read_registry
+    path = str(tmp_path / "seen.txt")
+    write_seen_ids(path, {"a", "b"}, retry={"c"}, unparsed={"d": "fp1"})
+    reg = read_registry(path)
+    assert (reg.seen, reg.retry, reg.unparsed) == ({"a", "b"}, {"c"}, {"d": "fp1"})
+
+
+def test_read_registry_missing_file_is_empty(tmp_path):
+    from mailquill.store import read_registry
+    reg = read_registry(str(tmp_path / "none.txt"))
+    assert (reg.seen, reg.retry, reg.unparsed) == (set(), set(), {})
+
+
+def test_rebuild_sqlite_failure_keeps_previous_db(tmp_path):
+    csv_path = str(tmp_path / "t.csv")
+    db_path = str(tmp_path / "t.db")
+    append_transactions(csv_path, [_txn("A")])
+    rebuild_sqlite(csv_path, db_path)
+    bad = _txn("B")
+    bad.amount = "not-a-number"      # float() 會丟 ValueError
+    try:
+        rebuild_sqlite(csv_path, db_path, txns=[bad])
+    except ValueError:
+        pass
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 1
+    finally:
+        conn.close()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["t.csv", "t.db"]
