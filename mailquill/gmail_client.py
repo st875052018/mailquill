@@ -1,15 +1,13 @@
 """Gmail API 服務函式。純解析委派給 gmail_message。"""
 from __future__ import annotations
 
-import os
 import socket
 import time
 
 from mailquill.gmail_message import (
     Attachment, EmailMessage, decode_b64url, header_value, walk_payload,
 )
-
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+from mailquill.google_auth import build_google_service
 
 # 暫時性錯誤：逾時/連線中斷/伺服器忙碌 → 退避重試（避免單封逾時就讓整批 run 中斷）
 _RETRYABLE = (TimeoutError, socket.timeout, ConnectionError, OSError)
@@ -38,27 +36,7 @@ def _execute(request, retries: int = 4, sleep=time.sleep):
 
 def build_service(credentials_path: str, token_path: str):
     """OAuth 授權並回傳 Gmail service。整合用，不寫單元測試。"""
-    import httplib2
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
-    from google_auth_httplib2 import AuthorizedHttp
-    from googleapiclient.discovery import build
-
-    creds = None
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(token_path, "w", encoding="utf-8") as f:
-            f.write(creds.to_json())
-    # 每個請求設 30 秒逾時，避免單一讀取無限期卡住；暫時性錯誤由 _execute 重試
-    authed = AuthorizedHttp(creds, http=httplib2.Http(timeout=30))
-    return build("gmail", "v1", http=authed, cache_discovery=False)
+    return build_google_service("gmail", "v1", credentials_path, token_path)
 
 
 def label_id(service, label_name: str, user_id: str = "me") -> str:
@@ -155,10 +133,7 @@ def get_message_metadata(service, msg_id: str,
     )
 
 
-def extract_message(service, msg_id: str, user_id: str = "me") -> EmailMessage:
-    msg = _execute(service.users().messages().get(
-        userId=user_id, id=msg_id, format="full",
-    ))
+def _build_email_message(service, msg_id: str, msg: dict, user_id: str) -> EmailMessage:
     payload = msg.get("payload", {}) or {}
     headers = payload.get("headers", []) or []
     texts, att_specs = walk_payload(payload)
@@ -184,3 +159,69 @@ def extract_message(service, msg_id: str, user_id: str = "me") -> EmailMessage:
         body_text="\n".join(texts),
         attachments=attachments,
     )
+
+
+def extract_message(service, msg_id: str, user_id: str = "me") -> EmailMessage:
+    msg = _execute(service.users().messages().get(
+        userId=user_id, id=msg_id, format="full",
+    ))
+    return _build_email_message(service, msg_id, msg, user_id)
+
+
+_BATCH_SIZE = 20  # Gmail batch endpoint 雖然單批上限是 100，但一次塞滿
+                  # 100 個併發子請求很容易觸發「Too many concurrent requests
+                  # for user」(429)，縮小批次以降低併發量。
+
+
+def extract_messages(service, msg_ids: list[str], user_id: str = "me",
+                     retries: int = 4, sleep=time.sleep) -> dict[str, EmailMessage]:
+    """一次以 batch HTTP request 取多封信的完整內容，取代逐封呼叫
+    `extract_message`：N 封信只需要 ceil(N/_BATCH_SIZE) 次 API round-trip，
+    不是 N 次。附件仍各自用獨立請求下載（唯一的呼叫端 cathay_autocat 只掃沒
+    有附件的每日通知信，這條路徑很少走到）。回傳 {msg_id: EmailMessage}。
+
+    batch 內個別子請求的錯誤不會像 `_execute` 那樣自動重試（那是整批 HTTP
+    請求本身的重試），所以這裡自己對每個 chunk 做退避重試：只重試 429/5xx
+    這類暫時性錯誤，且只重試真正失敗的那幾封信，不必整個 chunk 重來；遇到
+    非暫時性錯誤，或重試用盡，才拋出第一個錯誤。
+    """
+    from googleapiclient.errors import HttpError
+
+    if not msg_ids:
+        return {}
+    results: dict[str, EmailMessage] = {}
+
+    def _fetch(ids: list[str]) -> list[tuple[str, Exception]]:
+        failures: list[tuple[str, Exception]] = []
+
+        def _on_response(request_id, response, exception):
+            if exception is not None:
+                failures.append((request_id, exception))
+                return
+            results[request_id] = _build_email_message(service, request_id, response, user_id)
+
+        batch = service.new_batch_http_request(callback=_on_response)
+        for msg_id in ids:
+            batch.add(
+                service.users().messages().get(userId=user_id, id=msg_id, format="full"),
+                request_id=msg_id,
+            )
+        _execute(batch)
+        return failures
+
+    for i in range(0, len(msg_ids), _BATCH_SIZE):
+        pending = msg_ids[i:i + _BATCH_SIZE]
+        for attempt in range(retries):
+            failures = _fetch(pending)
+            if not failures:
+                break
+            retryable_ids = [
+                mid for mid, exc in failures
+                if isinstance(exc, HttpError)
+                and getattr(getattr(exc, "resp", None), "status", None) in _RETRY_STATUSES
+            ]
+            if len(retryable_ids) != len(failures) or attempt == retries - 1:
+                raise failures[0][1]
+            sleep(min(2 ** attempt, 8))
+            pending = retryable_ids
+    return results

@@ -1,8 +1,14 @@
 import base64
 
 import pytest
+from googleapiclient.errors import HttpError
 
 from mailquill.gmail_client import label_id, list_label_messages, extract_message
+
+
+def _http_error(status: int) -> HttpError:
+    resp = type("Resp", (), {"status": status, "reason": "error"})()
+    return HttpError(resp, b"{}", uri="https://example.com")
 
 
 def _b64(s: str) -> str:
@@ -15,6 +21,27 @@ class _Exec:
 
     def execute(self):
         return self._value
+
+
+class _FakeBatch:
+    """比照真的 BatchHttpRequest 介面（add/execute + callback），但不走
+    HTTP——逐一呼叫暫存請求的 `.execute()`，用回傳值/例外餵給 callback。
+    """
+    def __init__(self, callback):
+        self._callback = callback
+        self._items = []
+
+    def add(self, request, request_id=None):
+        self._items.append((request, request_id))
+
+    def execute(self):
+        for request, request_id in self._items:
+            try:
+                response = request.execute()
+            except Exception as e:  # noqa: BLE001（比照真的 batch callback 簽名）
+                self._callback(request_id, None, e)
+            else:
+                self._callback(request_id, response, None)
 
 
 class _AttachmentsProxy:
@@ -68,6 +95,9 @@ class FakeService:
     def users(self):
         return _Users(self)
 
+    def new_batch_http_request(self, callback=None):
+        return _FakeBatch(callback)
+
 
 def test_label_id_found_and_missing():
     svc = FakeService()
@@ -117,7 +147,157 @@ def test_extract_message_parses_body_and_downloads_attachment():
     assert msg.attachments[0].data == b"PDFBYTES"
 
 
-from mailquill.gmail_client import resolve_label_ids, list_labels_messages
+from mailquill.gmail_client import extract_messages, resolve_label_ids, list_labels_messages
+
+
+def test_extract_messages_batches_and_returns_by_id():
+    svc = FakeService()
+    svc.messages = {
+        "m1": {"payload": {"headers": [{"name": "Subject", "value": "s1"}],
+                           "mimeType": "text/plain", "body": {"data": _b64("body1")}}},
+        "m2": {"payload": {"headers": [{"name": "Subject", "value": "s2"}],
+                           "mimeType": "text/plain", "body": {"data": _b64("body2")}}},
+    }
+    result = extract_messages(svc, ["m1", "m2"])
+    assert set(result) == {"m1", "m2"}
+    assert result["m1"].subject == "s1"
+    assert result["m1"].body_text == "body1"
+    assert result["m2"].subject == "s2"
+    assert result["m2"].body_text == "body2"
+
+
+def test_extract_messages_empty_list_returns_empty_dict():
+    svc = FakeService()
+    assert extract_messages(svc, []) == {}
+
+
+def test_extract_messages_raises_first_error():
+    class _RaisingExec:
+        def execute(self):
+            raise RuntimeError("boom")
+
+    class _BoomMessagesResource:
+        def get(self, userId, id, format=None, metadataHeaders=None):
+            return _RaisingExec()
+
+    class _BoomUsers:
+        def messages(self):
+            return _BoomMessagesResource()
+
+    class _BoomService:
+        def users(self):
+            return _BoomUsers()
+
+        def new_batch_http_request(self, callback=None):
+            return _FakeBatch(callback)
+
+    with pytest.raises(RuntimeError):
+        extract_messages(_BoomService(), ["m1"])
+
+
+def test_extract_messages_splits_into_multiple_batches(monkeypatch):
+    import mailquill.gmail_client as gc
+    monkeypatch.setattr(gc, "_BATCH_SIZE", 1)
+    svc = FakeService()
+    svc.messages = {
+        "m1": {"payload": {"headers": [{"name": "Subject", "value": "s1"}],
+                           "mimeType": "text/plain", "body": {"data": _b64("b1")}}},
+        "m2": {"payload": {"headers": [{"name": "Subject", "value": "s2"}],
+                           "mimeType": "text/plain", "body": {"data": _b64("b2")}}},
+    }
+    batch_calls = []
+    orig_new_batch = svc.new_batch_http_request
+    svc.new_batch_http_request = lambda callback=None: (
+        batch_calls.append(1) or orig_new_batch(callback=callback)
+    )
+    result = extract_messages(svc, ["m1", "m2"])
+    assert len(batch_calls) == 2  # _BATCH_SIZE=1 → 兩封信各自一個 batch
+    assert set(result) == {"m1", "m2"}
+
+
+def test_extract_messages_retries_transient_error_for_just_that_message():
+    calls = {"n": 0}
+
+    class _Req:
+        def execute(self):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise _http_error(429)
+            return {"payload": {"headers": [{"name": "Subject", "value": "ok"}],
+                                 "mimeType": "text/plain", "body": {"data": _b64("body")}}}
+
+    class _MessagesResource:
+        def get(self, userId, id, format=None):
+            return _Req()
+
+    class _Users:
+        def messages(self):
+            return _MessagesResource()
+
+    class _Service:
+        def users(self):
+            return _Users()
+
+        def new_batch_http_request(self, callback=None):
+            return _FakeBatch(callback)
+
+    sleeps = []
+    result = extract_messages(_Service(), ["m1"], sleep=sleeps.append)
+    assert result["m1"].subject == "ok"
+    assert calls["n"] == 2  # 第一次 429，退避後第二次成功
+    assert sleeps == [1]
+
+
+def test_extract_messages_raises_after_exhausting_retries_on_transient_error():
+    class _Req:
+        def execute(self):
+            raise _http_error(429)
+
+    class _MessagesResource:
+        def get(self, userId, id, format=None):
+            return _Req()
+
+    class _Users:
+        def messages(self):
+            return _MessagesResource()
+
+    class _Service:
+        def users(self):
+            return _Users()
+
+        def new_batch_http_request(self, callback=None):
+            return _FakeBatch(callback)
+
+    sleeps = []
+    with pytest.raises(HttpError):
+        extract_messages(_Service(), ["m1"], retries=3, sleep=sleeps.append)
+    assert sleeps == [1, 2]  # 重試 2 次後、第 3 次仍失敗才放棄
+
+
+def test_extract_messages_nonretryable_error_raises_without_retry():
+    class _Req:
+        def execute(self):
+            raise _http_error(404)
+
+    class _MessagesResource:
+        def get(self, userId, id, format=None):
+            return _Req()
+
+    class _Users:
+        def messages(self):
+            return _MessagesResource()
+
+    class _Service:
+        def users(self):
+            return _Users()
+
+        def new_batch_http_request(self, callback=None):
+            return _FakeBatch(callback)
+
+    sleeps = []
+    with pytest.raises(HttpError):
+        extract_messages(_Service(), ["m1"], sleep=sleeps.append)
+    assert sleeps == []
 
 
 def test_resolve_label_ids_found_and_missing():
