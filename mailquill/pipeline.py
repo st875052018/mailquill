@@ -25,7 +25,7 @@ from mailquill.store import (
     append_transactions, rebuild_sqlite, read_transactions,
     read_registry, write_seen_ids, rekey_csv_rows,
 )
-from mailquill.ingest import IngestResult, ingest_pdf_bytes, ingest_csv_bytes
+from mailquill.ingest import IngestResult, ingest_attachment
 from mailquill.bills_store import append_bills
 
 
@@ -48,11 +48,18 @@ def _is_pdf(att) -> bool:
     return att.mime_type == "application/pdf" or att.filename.lower().endswith(".pdf")
 
 
+_PKG_DIR = Path(parsers_pkg.__file__).parent.parent
+# import_label 的附件靠 ingest 依內容挑 parser、CSV 走各自的匯入器，這些改了也算 parser 改版
+_EXTRA_PARSER_FILES = ("amex_csv.py", "ctbc_csv.py", "ingest.py")
+
+
 def parser_fingerprint() -> str:
     """所有 parser 原始碼的雜湊。解不出交易的信會連同它一起記下，parser 一改
     （可能就能解了）指紋就不同，下次 run 自動重抓。"""
     h = hashlib.sha1()
-    for path in sorted(Path(parsers_pkg.__file__).parent.glob("*.py")):
+    paths = sorted(Path(parsers_pkg.__file__).parent.glob("*.py"))
+    paths += [_PKG_DIR / name for name in _EXTRA_PARSER_FILES]
+    for path in paths:
         h.update(path.name.encode())
         h.update(path.read_bytes())
     return h.hexdigest()[:12]
@@ -66,21 +73,13 @@ def _import_attachments(msg, passwords, imported_at, category_rules):
     sub = IngestResult()
     txns, bill_dues, had_csv = [], [], False
     for att in msg.attachments:
-        ref = f"{msg.msg_id}:{att.filename}"
-        if _is_pdf(att):
-            t, bill_due = ingest_pdf_bytes(att.data, att.filename, msg.msg_id, ref,
-                                           passwords, None, imported_at,
-                                           category_rules, sub)
-            txns.extend(t)
-            if bill_due:
-                bill_dues.append(bill_due)
-        elif att.filename.lower().endswith(".csv"):
-            had_csv = True
-            txns.extend(ingest_csv_bytes(att.data, att.filename, msg.msg_id, ref,
-                                         None, imported_at, category_rules, sub))
-        else:
-            continue
-        sub.files += 1
+        t, bill_due, kind = ingest_attachment(
+            att.data, att.filename, msg.msg_id, f"{msg.msg_id}:{att.filename}",
+            passwords, imported_at, category_rules, sub, is_pdf=_is_pdf(att))
+        txns.extend(t)
+        if bill_due:
+            bill_dues.append(bill_due)
+        had_csv = had_csv or kind == "csv"
     return txns, bill_dues, sub, had_csv
 
 
@@ -111,10 +110,13 @@ def run_pipeline(service, cfg: Config, imported_at: str,
     fingerprint = parser_fingerprint()
     # parser 當時解不出東西、且 parser 之後沒改過的信，重抓也只會得到一樣的結果
     unchanged_unparsed = {m for m, fp in existing_unparsed.items() if fp == fingerprint}
+    # 匯入信可能部分附件已入帳、部分解不出：交易在 CSV 裡也一樣，parser 改版就要重抓
+    changed_unparsed = set(existing_unparsed) - unchanged_unparsed
     seen_msg_ids: set[str] = (
         set() if force_refetch
         else ({t.source_msg_id for t in read_transactions(cfg.csv_path)}
-              | existing_registry_ids | unchanged_unparsed) - existing_retry_ids
+              | existing_registry_ids | unchanged_unparsed)
+        - existing_retry_ids - changed_unparsed
     )
     new_unparsed: dict[str, str] = {}
     newly_processed_ids: set[str] = set()
@@ -127,25 +129,35 @@ def run_pipeline(service, cfg: Config, imported_at: str,
     ids, missing = list_labels_messages(service, cfg.label_names(), query=query)
     result.missing_labels.extend(missing)
     import_set = set(import_ids)
-    ids = [m for m in ids if m not in import_set]   # 兩邊都有的信只走匯入那條
+    ids = [m for m in ids if m not in import_set]   # 兩邊都有的信先看是不是銀行寄的
     result.fetched = len(ids) + len(import_ids)
 
     collected = []
     bill_dues = []
     imported_csv = False
     total = result.fetched
-    for i, mid in enumerate(import_ids):
+    done = 0
+    for mid in import_ids:
+        done += 1
         if on_progress:
-            on_progress(i + 1, total)
-        result.matched += 1
+            on_progress(done, total)
         if mid in seen_msg_ids:
+            result.matched += 1
             result.already_seen += 1
             continue
         try:
             msg = extract_message(service, mid)
         except Exception as e:
+            result.matched += 1
             result.fetch_failures.append(f"{mid}: fetch: {e}")
             continue
+        if get_parser(msg) is not None:
+            # 篩選器把銀行信也貼了 import_label：照寄件人走銀行 parser，
+            # 不然只看附件會漏掉內文型通知與 HSBC 的應繳金額
+            ids.append(mid)
+            done -= 1
+            continue
+        result.matched += 1
         txns, dues, sub, had_csv = _import_attachments(msg, passwords, imported_at,
                                                        category_rules)
         collected.extend(txns)
@@ -161,14 +173,15 @@ def run_pipeline(service, cfg: Config, imported_at: str,
                 f"{msg.sender} | {msg.subject}（沒有可匯入的 PDF/CSV 附件）")
         if sub.retryable:
             retry_ids.add(mid)
-        elif txns or dues:
+        elif (txns or dues) and not sub.needs_parser:
             newly_processed_ids.add(mid)
-        else:
+        else:   # 全部或部分附件解不出：parser 改版後再重抓（已入帳的會被去重）
             new_unparsed[mid] = fingerprint
 
-    for i, mid in enumerate(ids, start=len(import_ids)):
+    for mid in ids:
+        done += 1
         if on_progress:
-            on_progress(i + 1, total)
+            on_progress(done, total)
         # 先用輕量標頭過濾，不符合規則的就不下載完整信件與附件。
         # 單封信抓取失敗(網路逾時等)不應中斷整批 — 記錄後跳過，重跑可靠去重補回。
         try:

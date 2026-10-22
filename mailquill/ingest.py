@@ -92,7 +92,10 @@ def _load_csv_txns(raw_bytes: bytes) -> tuple[str, list[RawTxn]]:
             text = raw_bytes.decode(encoding)
         except UnicodeDecodeError:
             continue
-        raws = parse(text)
+        try:
+            raws = parse(text)
+        except Exception:  # 欄位對得上但內容格式不同（如 Excel 另存成 ISO 日期）
+            continue
         if raws:
             return bank, raws
 
@@ -222,6 +225,35 @@ def ingest_pdf_bytes(raw: bytes, name: str, source_id: str, raw_ref: str,
         result.parse_warnings.append(f"{name}: 應繳金額解析失敗 {e}")
         bill_due = None
     return txns, bill_due
+
+
+def is_pdf_name(name: str) -> bool:
+    return name.lower().endswith(".pdf")
+
+
+def is_csv_name(name: str) -> bool:
+    return name.lower().endswith(".csv")
+
+
+def ingest_attachment(data: bytes, name: str, source_id: str, raw_ref: str,
+                      passwords, imported_at, rules, result: IngestResult,
+                      *, is_pdf: bool = False):
+    """一個 Gmail 附件依副檔名（或 is_pdf）分給 PDF／CSV 匯入。
+
+    回傳 (交易清單, 應繳資料或 None, 種類 "pdf"/"csv"/None)；不是帳單檔回 None 種類。
+    """
+    if is_pdf or is_pdf_name(name):
+        txns, bill_due = ingest_pdf_bytes(data, name, source_id, raw_ref, passwords,
+                                          None, imported_at, rules, result)
+        kind = "pdf"
+    elif is_csv_name(name):
+        txns = ingest_csv_bytes(data, name, source_id, raw_ref, None, imported_at,
+                                rules, result)
+        bill_due, kind = None, "csv"
+    else:
+        return [], None, None
+    result.files += 1
+    return txns, bill_due, kind
 
 
 def _ingest_csv(path: str, bank, imported_at, rules, result: IngestResult):

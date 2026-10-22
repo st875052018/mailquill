@@ -588,3 +588,73 @@ def test_bank_mail_still_routed_by_sender_with_import_label_set(monkeypatch, tmp
     result = _run(cfg)
     assert result.added == 1
     assert result.imported == []
+
+
+def test_import_malformed_csv_does_not_abort_run(monkeypatch, tmp_path):
+    """Excel 另存成 ISO 日期的 Amex CSV：parser 會丟例外，不能讓整個 run 掛掉。"""
+    bad = (_AMEX_HEADER + '2026-07-27,X,JANE DOE,-73006,15.50,"",X,,,,,,Travel\n').encode()
+    msgs = {"s1": _self_mail("s1", [Attachment("bad.csv", "text/csv", bad)]),
+            "s2": _self_mail("s2", [Attachment("amex.csv", "text/csv", _amex_csv())])}
+    cfg = _setup_import(monkeypatch, tmp_path, {}, msgs)
+
+    result = _run(cfg)
+    assert result.added == 1
+    assert any("bad.csv" in x for x in result.needs_parser)
+
+
+def test_fingerprint_covers_csv_importers_and_ingest():
+    """CSV 匯入解不出來的信靠指紋判斷要不要重抓，改 amex_csv/ctbc_csv/ingest 也要變。"""
+    import hashlib
+    from pathlib import Path
+    import mailquill
+    pkg = Path(mailquill.__file__).parent
+    real_read = Path.read_bytes
+    fp = pipeline.parser_fingerprint()
+    for name in ("amex_csv.py", "ctbc_csv.py", "ingest.py"):
+        target = pkg / name
+        def patched(self, _t=target):
+            data = real_read(self)
+            return data + b"#changed" if self == _t else data
+        Path.read_bytes = patched
+        try:
+            assert pipeline.parser_fingerprint() != fp, name
+        finally:
+            Path.read_bytes = real_read
+
+
+def test_import_partially_parsed_mail_is_retried_after_parser_change(monkeypatch, tmp_path):
+    """一封信兩個附件、只解出一個：解不出的那個在 parser 改版後要能補回。"""
+    pdf = _encrypted_pdf(["2026-06-01 PXMART 1,200"], "PW1")
+    msg = _self_mail("s1", [Attachment("fubon.pdf", "application/pdf", pdf),
+                            Attachment("new.csv", "text/csv", b"weird,format\n1,2\n")])
+    cfg = _setup_import(monkeypatch, tmp_path, {}, {"s1": msg})
+    monkeypatch.setattr(pipeline, "parser_fingerprint", lambda: "v1")
+    first = _run(cfg)
+    assert first.added == 1
+    assert any("new.csv" in x for x in first.needs_parser)
+
+    second = _run(cfg)                       # parser 沒變：不重抓
+    assert second.already_seen == 1
+
+    monkeypatch.setattr(pipeline, "parser_fingerprint", lambda: "v2")
+    third = _run(cfg)                        # parser 改了：重抓（已入帳的不會重複）
+    assert third.already_seen == 0
+    assert third.added == 0 and third.skipped == 1
+
+
+def test_bank_mail_tagged_with_import_label_uses_bank_parser(monkeypatch, tmp_path):
+    """篩選器設太寬、把銀行信也貼上 import_label：仍要照寄件人走銀行 parser（含內文）。"""
+    from mailquill.parsers.example_bank import ExampleBankParser
+    pdf = _encrypted_pdf(["2026-06-01 PXMART 1,200"], "PW1")
+    bank = EmailMessage(msg_id="b1", sender="ebill@example-bank.test", subject="帳單",
+                        date="", body_text="",
+                        attachments=[Attachment("stmt.pdf", "application/pdf", pdf)])
+    cfg = _setup_import(monkeypatch, tmp_path, {"b1": bank}, {"b1": bank})
+    monkeypatch.setattr(pipeline, "get_parser",
+                        lambda m: ExampleBankParser() if "example-bank" in m.sender else None)
+
+    result = _run(cfg)
+    assert result.fetched == 1
+    assert result.matched == 1
+    assert result.added == 1
+    assert result.imported == []             # 沒走匯入那條
