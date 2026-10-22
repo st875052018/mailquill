@@ -3,6 +3,9 @@
 比對前會先做 Unicode 正規化（NFKC）與大小寫摺疊（casefold），所以
 全形/半形（ＱＴａｘｉ↔QTaxi、ＧｌｏｂａｌＭａｌｌ↔GlobalMall）與大小寫
 （Uber↔UBER）都視為相同，台灣帳單常見的全形英數字也能正確命中。
+
+所有規則都沒命中時，再忽略空白比一次：OCR 抽出的商家名稱常在字中間多插
+空白（SEVEN- ELEVEN、m om o購物網）。只當備援、不改變原本就命中的結果。
 """
 from __future__ import annotations
 
@@ -21,6 +24,10 @@ _RULE_LINE_RE = re.compile(r"^(\s*-\s*)(\{.*\})\s*$")
 
 def _fold(s: str) -> str:
     return unicodedata.normalize("NFKC", s).casefold()
+
+
+def _squeeze(s: str) -> str:
+    return re.sub(r"\s+", "", s)
 
 
 @dataclass
@@ -136,6 +143,10 @@ def categorize(merchant_raw: str, rules: list[Rule]) -> tuple[str, str]:
     folded = _fold(merchant_raw)
     for rule in rules:
         if _fold(rule.keyword) in folded:
+            return (rule.l1, rule.l2)
+    squeezed = _squeeze(folded)
+    for rule in rules:
+        if _squeeze(_fold(rule.keyword)) in squeezed:
             return (rule.l1, rule.l2)
     return ("Uncategorized", "")
 

@@ -71,6 +71,34 @@ def test_categorize_is_fullwidth_and_case_insensitive(tmp_path):
     assert categorize("UBER EATS", rules) == ("Transport", "Taxi")        # 大小寫
 
 
+
+def test_categorize_falls_back_to_ignoring_spaces(tmp_path):
+    """OCR 會在字中間插空白（SEVEN- ELEVEN、m om o）；正常比對都沒中才忽略空白再比。"""
+    import textwrap
+    p = tmp_path / "c.yaml"
+    p.write_text(textwrap.dedent("""
+        rules:
+          - {keyword: "SEVEN-ELEVEN", l1: "Food", l2: "Convenience"}
+          - {keyword: "momo購物", l1: "Shopping", l2: "Online"}
+    """), encoding="utf-8")
+    rules = load_categories(str(p))
+    assert categorize("APE7844SEVEN- ELEVEN", rules) == ("Food", "Convenience")
+    assert categorize("連加*m om o購物網", rules) == ("Shopping", "Online")
+
+
+def test_space_fallback_never_overrides_a_normal_match(tmp_path):
+    """去空白的規則排前面也不能搶走「原本就比對得到」的規則。"""
+    import textwrap
+    p = tmp_path / "c.yaml"
+    p.write_text(textwrap.dedent("""
+        rules:
+          - {keyword: "TICKETP", l1: "Shopping", l2: ""}
+          - {keyword: "TICKET PIA", l1: "Entertainment", l2: "Tickets"}
+    """), encoding="utf-8")
+    rules = load_categories(str(p))
+    assert categorize("TICKET PIA (HAWKS)", rules) == ("Entertainment", "Tickets")
+
+
 def _flow_rules_file(tmp_path, body):
     p = tmp_path / "c.yaml"
     p.write_text(body, encoding="utf-8")
