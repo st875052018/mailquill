@@ -3,6 +3,9 @@ token_path，避免各自跑一次授權流程、也避免使用者要管理兩�
 
 若既有 token.json 是舊版（只含 gmail.readonly），拿去跑會缺 Sheets 權限；
 刪掉 token_path 讓下一次呼叫走過完整的 InstalledAppFlow 即可重新同意。
+
+排程執行（環境變數 MAILQUILL_NONINTERACTIVE=1，例如 mbp 上的 watchtower）沒有人能
+點瀏覽器：需要重新授權時直接丟 AuthExpired，不開瀏覽器卡住等。
 """
 from __future__ import annotations
 
@@ -12,6 +15,10 @@ import os
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
 SCOPES = [GMAIL_SCOPE, SHEETS_SCOPE]
+
+
+class AuthExpired(RuntimeError):
+    """需要重新到瀏覽器授權，但現在是非互動執行。"""
 
 
 def get_credentials(credentials_path: str, token_path: str):
@@ -37,6 +44,9 @@ def get_credentials(credentials_path: str, token_path: str):
                 print(f"Google 授權已失效（{e.args[0] if e.args else e}），開啟瀏覽器重新授權…")
                 creds = None
         if not creds:
+            if os.environ.get("MAILQUILL_NONINTERACTIVE"):
+                raise AuthExpired("Google 授權失效，需要重新登入：在有瀏覽器的電腦跑一次 "
+                                  "mailquill run，再把新的 token.json 複製過來")
             flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
             creds = flow.run_local_server(port=0)
         with open(token_path, "w", encoding="utf-8") as f:
