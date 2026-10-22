@@ -1,6 +1,7 @@
 """hsbc_ocr_text 測試：合成 PDF（真文字列 + 內嵌小圖當「商家名稱」），
-驗證商家欄位圖片配對＋OCR 真的會跑並接回原文字列。需要本機裝 tesseract
-（含 chi_tra）；沒裝就跳過，不讓 CI 因缺系統套件而炸。
+驗證商家欄位圖片配對＋OCR 真的會跑並接回原文字列。兩種 OCR 引擎各跑一遍：
+macOS Vision（ocrmac）與 tesseract（含 chi_tra）；本機沒有的引擎就跳過，
+不讓 CI 因缺系統套件而炸。
 """
 import io
 
@@ -9,15 +10,28 @@ from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
-pytest.importorskip("pytesseract")
-import pytesseract  # noqa: E402
+import mailquill.hsbc_ocr_text as mod
+from mailquill.hsbc_ocr_text import extract_pdf_text_ocr
 
-from mailquill.hsbc_ocr_text import extract_pdf_text_ocr  # noqa: E402
 
-try:
-    pytesseract.get_tesseract_version()
-except Exception:
-    pytest.skip("tesseract 未安裝，跳過 OCR 測試", allow_module_level=True)
+def _tesseract_ready() -> bool:
+    if mod.pytesseract is None:
+        return False
+    try:
+        mod.pytesseract.get_tesseract_version()
+    except Exception:
+        return False
+    return True
+
+
+@pytest.fixture(autouse=True, params=["vision", "tesseract"])
+def engine(request, monkeypatch):
+    if request.param == "vision" and mod.ocrmac is None:
+        pytest.skip("ocrmac 未安裝（非 macOS），跳過 Vision OCR 測試")
+    if request.param == "tesseract" and not _tesseract_ready():
+        pytest.skip("tesseract 未安裝，跳過 tesseract OCR 測試")
+    monkeypatch.setenv("MAILQUILL_OCR", request.param)
+    return request.param
 
 
 def _merchant_image(text: str) -> Image.Image:
@@ -75,8 +89,21 @@ def test_ocr_missing_merchant_image_leaves_line_as_is():
     assert lines == ["07/19 07/22 JPN JPY 2,112.00 07/19 422"]
 
 
-def test_ocr_raises_without_pytesseract(monkeypatch):
-    import mailquill.hsbc_ocr_text as mod
-    monkeypatch.setattr(mod, "pytesseract", None)
+def test_ocr_raises_when_chosen_engine_missing(engine, monkeypatch):
+    monkeypatch.setattr(mod, "ocrmac" if engine == "vision" else "pytesseract", None)
     with pytest.raises(RuntimeError):
         mod.extract_pdf_text_ocr(_pdf_with_detail_row("TEST SHOP"))
+
+
+def test_default_engine_prefers_vision_then_tesseract(monkeypatch):
+    monkeypatch.delenv("MAILQUILL_OCR", raising=False)
+    monkeypatch.setattr(mod, "ocrmac", object())
+    assert mod.ocr_engine() == "vision"
+    monkeypatch.setattr(mod, "ocrmac", None)
+    assert mod.ocr_engine() == "tesseract"
+
+
+def test_unknown_engine_name_raises(monkeypatch):
+    monkeypatch.setenv("MAILQUILL_OCR", "abbyy")
+    with pytest.raises(ValueError):
+        mod.ocr_engine()

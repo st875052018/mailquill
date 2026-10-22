@@ -13,10 +13,15 @@
 商家名稱來自 OCR，非 100% 準確——尤其海外消費列商家欄常混入國旗小圖示，
 被誤判成雜訊字元（如 "APE7844" 之類前綴）。這是已知限制：不在此做啟發式
 清洗（清不乾淨還可能誤刪真商家名），交給分類規則或手動修正。
+
+OCR 引擎：macOS 上預設用系統內建的 Vision（`ocrmac`，免裝 tesseract，
+Intel Mac 沒有 Homebrew 也能用），其他平台用 tesseract。可用環境變數
+`MAILQUILL_OCR=vision|tesseract` 強制指定（比對兩種引擎結果時用）。
 """
 from __future__ import annotations
 
 import io
+import os
 import re
 from dataclasses import dataclass
 
@@ -27,7 +32,13 @@ try:
 except ImportError:  # pragma: no cover — 未裝 pytesseract 時延後到呼叫才報錯
     pytesseract = None
 
+try:
+    from ocrmac import ocrmac
+except ImportError:  # pragma: no cover — 非 macOS 沒有 Vision
+    ocrmac = None
+
 _OCR_LANG = "chi_tra+eng"
+_VISION_LANGS = ["zh-Hant", "en-US"]
 
 
 @dataclass(frozen=True)
@@ -93,13 +104,30 @@ def _ocr_crop(page_image, im: dict, resolution: int) -> str:
         int(im["x1"] * scale) + 2, int(im["bottom"] * scale) + 2,
     )
     crop = page_image.original.crop(box)
+    if ocr_engine() == "vision":
+        # 回傳 (文字, 信心, [x, y, w, h])；一張小圖通常只有一段，多段時依 x 由左到右接
+        found = ocrmac.OCR(crop, language_preference=_VISION_LANGS).recognize()
+        return " ".join(t for t, _, _ in sorted(found, key=lambda r: r[2][0])).strip()
     return pytesseract.image_to_string(crop, lang=_OCR_LANG, config=_OCR_CONFIG).strip()
+
+
+def ocr_engine() -> str:
+    """回傳這次要用的 OCR 引擎名稱："vision" 或 "tesseract"。"""
+    name = os.environ.get("MAILQUILL_OCR", "")
+    if not name:
+        return "vision" if ocrmac is not None else "tesseract"
+    if name not in ("vision", "tesseract"):
+        raise ValueError(f"MAILQUILL_OCR 只能是 vision 或 tesseract，收到 {name!r}")
+    return name
 
 
 def extract_pdf_text_ocr(pdf_bytes: bytes, resolution: int = 400,
                          layout: OcrLayout = HSBC_LAYOUT) -> str:
     """抽字並把明細列的商家小圖 OCR 結果接在該列文字後面回傳（跨頁以換行合併）。"""
-    if pytesseract is None:
+    engine = ocr_engine()
+    if engine == "vision" and ocrmac is None:
+        raise RuntimeError("需要 ocrmac 才能用 macOS Vision OCR（pip install ocrmac）")
+    if engine == "tesseract" and pytesseract is None:
         raise RuntimeError("需要 pytesseract 才能解析圖片型商家名稱的帳單"
                            "（brew install tesseract tesseract-lang）")
 
