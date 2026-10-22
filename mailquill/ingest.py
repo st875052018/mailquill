@@ -9,6 +9,10 @@ Amex 格式，失敗或解不出交易再試 Big5 解 CTBC 格式。
 與 `run` 共用 txn_id 去重，所以同一份帳單即使先前已由 Gmail 抓過，
 再以本地檔匯入也不會重複入帳。
 
+`ingest_pdf_bytes`／`ingest_csv_bytes` 吃的是檔案內容，`run` 處理「寄給
+自己」的手動帳單信（config `import_label`）時也直接拿附件呼叫，兩條路徑
+挑 parser 的方式一致。
+
 PDF 路徑額外呼叫 `parser.parse_bill`（跟 `run_pipeline` 一致，見
 `pipeline.py`）把應繳總額/最低應繳寫進 `bills.csv`；CSV 匯入（Amex/CTBC
 手動匯出）沒有這類彙總欄位，不呼叫。
@@ -43,6 +47,8 @@ class IngestResult:
     unlock_failures: list[str] = field(default_factory=list)
     needs_parser: list[str] = field(default_factory=list)   # 無 parser 能解析的檔
     parse_warnings: list[str] = field(default_factory=list)
+    # 有檔案讀不到／解不開／抽字失敗：補上密碼或環境後重跑應能補回
+    retryable: bool = False
 
 
 def _collect_by_ext(paths: list[str], ext: str) -> list[str]:
@@ -169,23 +175,36 @@ def _read_file(path: str, result: IngestResult) -> bytes | None:
             return f.read()
     except OSError as e:
         result.unlock_failures.append(f"{os.path.basename(path)}: 讀檔失敗 {e}")
+        result.retryable = True
         return None
 
 
 def _ingest_pdf(path: str, passwords, bank, imported_at, rules, result: IngestResult):
-    """回傳 (交易清單, 應繳資料或 None)；失敗已記進 result，回傳空清單。"""
-    name = os.path.basename(path)
     raw = _read_file(path, result)
     if raw is None:
         return [], None
+    name = os.path.basename(path)
+    return ingest_pdf_bytes(raw, name, name, path, passwords, bank, imported_at,
+                            rules, result)
+
+
+def ingest_pdf_bytes(raw: bytes, name: str, source_id: str, raw_ref: str,
+                     passwords, bank, imported_at, rules, result: IngestResult):
+    """回傳 (交易清單, 應繳資料或 None)；失敗已記進 result，回傳空清單。
+
+    name 是顯示用的檔名；source_id／raw_ref 寫進交易的 source_msg_id／raw_ref
+    （本地檔是檔名／路徑，Gmail 附件是信件 id／「信件id:檔名」）。
+    """
     res = unlock_pdf(raw, passwords)
     if not res.ok:
         result.unlock_failures.append(f"{name}: {res.error}")
+        result.retryable = True
         return [], None
     try:
         parser, raws, text = select_parser_for_pdf(res.data, bank)
     except Exception as e:
         result.parse_warnings.append(f"{name}: 文字抽取失敗 {e}")
+        result.retryable = True
         return [], None
     if not raws:
         result.needs_parser.append(name)
@@ -193,12 +212,12 @@ def _ingest_pdf(path: str, passwords, bank, imported_at, rules, result: IngestRe
     result.parsed.append(f"{name} -> {parser.bank} ({len(raws)}筆)")
     txns = []
     for seq, raw_txn in enumerate(raws):
-        txn = normalize(raw_txn, name, "pdf", path, imported_at, seq=seq)
+        txn = normalize(raw_txn, source_id, "pdf", raw_ref, imported_at, seq=seq)
         if txn.amount == "":
             result.parse_warnings.append(f"{name}:{raw_txn.merchant_raw}")
         txns.append(apply_categories(txn, rules))
     try:
-        bill_due = parser.parse_bill(EmailMessage(name, "", "", "", "", []), [text])
+        bill_due = parser.parse_bill(EmailMessage(source_id, "", "", "", "", []), [text])
     except Exception as e:
         result.parse_warnings.append(f"{name}: 應繳金額解析失敗 {e}")
         bill_due = None
@@ -206,10 +225,16 @@ def _ingest_pdf(path: str, passwords, bank, imported_at, rules, result: IngestRe
 
 
 def _ingest_csv(path: str, bank, imported_at, rules, result: IngestResult):
-    name = os.path.basename(path)
     raw_bytes = _read_file(path, result)
     if raw_bytes is None:
         return []
+    name = os.path.basename(path)
+    return ingest_csv_bytes(raw_bytes, name, name, path, bank, imported_at, rules, result)
+
+
+def ingest_csv_bytes(raw_bytes: bytes, name: str, source_id: str, raw_ref: str,
+                     bank, imported_at, rules, result: IngestResult):
+    """參數意義同 `ingest_pdf_bytes`；回傳交易清單。"""
     csv_bank, raws = _load_csv_txns(raw_bytes)
     if not raws:
         result.needs_parser.append(name)
@@ -222,7 +247,8 @@ def _ingest_csv(path: str, bank, imported_at, rules, result: IngestResult):
     # 用列序號；改用「同日同店同額在『這個檔案』內第幾次出現」，兩份檔案才會算出
     # 同樣的 txn_id 而被去重。一定要一個檔案算一次，合併計數會把跨檔的同一筆
     # 當成當天第二筆。
-    txns, _ = rekey_txns([normalize(r, name, "csv", path, imported_at) for r in raws])
+    txns, _ = rekey_txns([normalize(r, source_id, "csv", raw_ref, imported_at)
+                          for r in raws])
     for txn in txns:
         if txn.amount == "":
             result.parse_warnings.append(f"{name}:{txn.merchant_raw}")

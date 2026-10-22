@@ -164,6 +164,7 @@ def _do_run(cfg, service, args):
           f"added={r.added} skipped={r.skipped}")
     if r.missing_labels:
         print(f"找不到 Gmail Label（{len(r.missing_labels)}）：{', '.join(r.missing_labels)}")
+    _print_items("手動帳單匯入", r.imported)
     _print_items("待補 parser", r.needs_parser)
     _print_items("PDF 解密失敗", r.unlock_failures)
     _print_items("解析警告", r.parse_warnings)

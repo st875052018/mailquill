@@ -18,6 +18,12 @@ sheets_state_path: "sheets_state.json" # sync-sheets 存自動建立的試算表
 bills_path: "bills.csv"               # 帳單應繳總額/最低應繳（目前只有 HSBC 支援）
 seen_ids_path: "seen_msg_ids.txt"     # 已處理信件登記檔，避免 reconcile 併掉的重複被 run 重新加回
 
+# 選用：手動下載的帳單（富邦 PDF、Amex/CTBC CSV）不用在本機跑 ingest，寄到
+# Gmail 就好。在 Gmail 設篩選器把這些信貼上這個 label（建議條件：
+# from:me to:你的帳號+mailquill@gmail.com，並勾「略過收件匣」），run／update
+# 就會把附件依內容挑 parser 匯入，不看寄件人、不套 rules.yaml。留空則停用。
+# import_label: "mailquill匯入"
+
 # 選用：若房租/固定支出是用台北富邦網銀轉帳（非信用卡），可設定收款帳戶特徵，
 # 讓 mailquill 從富邦「臺幣轉帳交易成功通知」信自動記一筆（分類為 Housing/Rent，
 # 見 categories.yaml）。兩個片段都要出現在信件內文才算命中；不設定就不會解析

@@ -437,3 +437,154 @@ def test_run_pipeline_retries_mail_whose_pdf_was_locked_even_if_body_was_saved(
     third = pipeline.run_pipeline(service=object(), cfg=cfg,
                                   imported_at="2026-06-24T10:10:00")
     assert third.already_seen == 1
+
+
+# ── 手動帳單「寄給自己」匯入（import_label）────────────────────────────
+# 富邦 PDF／Amex CSV 這類要自己下載的帳單，寄到 Gmail 並貼上 import_label，
+# run 會把附件依「內容」挑 parser（跟 `mailquill ingest` 同一套），不看寄件人。
+
+_AMEX_HEADER = (
+    "Date,Description,Card Member,Account #,Amount,Extended Details,"
+    "Appears On Your Statement As,Address,City/State,Zip Code,Country,"
+    "Reference,Category\n"
+)
+
+
+def _amex_csv() -> bytes:
+    desc = "TEST MERCHANT SEATTLE WA"
+    return (_AMEX_HEADER + f'07/27/2026,{desc},JANE DOE,-73006,15.50,"",{desc},'
+            ',,,,,Travel-Airline\n').encode("utf-8")
+
+
+def _self_mail(mid, attachments):
+    return EmailMessage(msg_id=mid, sender="me@gmail.test", subject="mailquill",
+                        date="", body_text="", attachments=attachments)
+
+
+def _setup_import(monkeypatch, tmp_path, bank_msgs, import_msgs):
+    """bank_msgs 在 cfg.label 底下、import_msgs 在 import_label 底下（可重疊）。"""
+    cfg = _cfg(tmp_path)
+    cfg.import_label = "mailquill匯入"
+    everything = {**bank_msgs, **import_msgs}
+
+    def list_labels(service, labels, query=None):
+        src = import_msgs if labels == [cfg.import_label] else bank_msgs
+        return list(src.keys()), []
+
+    monkeypatch.setattr(pipeline, "load_rules",
+                        lambda path: Rules(senders=["@example-bank.test"],
+                                           subject_keywords=[]))
+    monkeypatch.setattr(pipeline, "list_labels_messages", list_labels)
+    monkeypatch.setattr(pipeline, "get_message_metadata",
+                        lambda service, mid: (everything[mid].sender,
+                                              everything[mid].subject, everything[mid].date))
+    monkeypatch.setattr(pipeline, "extract_message", lambda service, mid: everything[mid])
+    return cfg
+
+
+def _run(cfg):
+    return pipeline.run_pipeline(service=object(), cfg=cfg,
+                                 imported_at="2026-10-22T10:00:00")
+
+
+def test_import_label_pdf_is_parsed_by_content_not_sender(monkeypatch, tmp_path):
+    pdf = _encrypted_pdf(["2026-06-01 PXMART 1,200"], "PW1")
+    msg = _self_mail("s1", [Attachment("fubon.pdf", "application/pdf", pdf)])
+    cfg = _setup_import(monkeypatch, tmp_path, {}, {"s1": msg})
+
+    result = _run(cfg)
+    assert result.fetched == 1
+    assert result.matched == 1
+    assert result.added == 1
+    assert result.needs_parser == []
+    assert result.imported == ["fubon.pdf -> ExampleBank (1筆)"]
+    rows = read_transactions(cfg.csv_path)
+    assert [(r.merchant_raw, r.amount, r.category_l1) for r in rows] == [
+        ("PXMART", "1200", "Food")]
+    assert rows[0].source_msg_id == "s1"
+    assert rows[0].raw_ref == "s1:fubon.pdf"
+
+
+def test_import_label_csv_attachment(monkeypatch, tmp_path):
+    msg = _self_mail("s1", [Attachment("amex.csv", "text/csv", _amex_csv())])
+    cfg = _setup_import(monkeypatch, tmp_path, {}, {"s1": msg})
+
+    result = _run(cfg)
+    assert result.added == 1
+    assert result.imported == ["amex.csv -> Amex (1筆)"]
+    rows = read_transactions(cfg.csv_path)
+    assert [(r.bank, r.amount, r.source_type) for r in rows] == [("Amex", "15.50", "csv")]
+
+
+def test_import_same_bill_twice_does_not_double_count(monkeypatch, tmp_path):
+    """同一份帳單寄兩次（兩封不同的信）只入帳一次：txn_id 由交易內容算出。"""
+    csv = _amex_csv()
+    msgs = {"s1": _self_mail("s1", [Attachment("a.csv", "text/csv", csv)]),
+            "s2": _self_mail("s2", [Attachment("a (1).csv", "text/csv", csv)])}
+    cfg = _setup_import(monkeypatch, tmp_path, {}, msgs)
+
+    result = _run(cfg)
+    assert result.added == 1
+    assert result.skipped == 1
+    assert len(read_transactions(cfg.csv_path)) == 1
+
+
+def test_import_message_is_not_refetched_on_next_run(monkeypatch, tmp_path):
+    msg = _self_mail("s1", [Attachment("amex.csv", "text/csv", _amex_csv())])
+    cfg = _setup_import(monkeypatch, tmp_path, {}, {"s1": msg})
+    _run(cfg)
+
+    def boom(service, mid):
+        raise AssertionError("已處理過的信不該再下載")
+    monkeypatch.setattr(pipeline, "extract_message", boom)
+    result = _run(cfg)
+    assert result.already_seen == 1
+    assert result.added == 0
+
+
+def test_import_wrong_password_is_retried(monkeypatch, tmp_path):
+    pdf = _encrypted_pdf(["2026-06-01 PXMART 1,200"], "OTHER")
+    msg = _self_mail("s1", [Attachment("fubon.pdf", "application/pdf", pdf)])
+    cfg = _setup_import(monkeypatch, tmp_path, {}, {"s1": msg})
+
+    result = _run(cfg)
+    assert result.added == 0
+    assert len(result.unlock_failures) == 1
+    assert result.unlock_failures[0].startswith("s1:fubon.pdf")
+    from mailquill.store import read_registry
+    assert read_registry(cfg.seen_ids_path).retry == {"s1"}
+
+
+def test_import_message_without_bill_attachment_is_reported(monkeypatch, tmp_path):
+    msg = _self_mail("s1", [Attachment("photo.jpg", "image/jpeg", b"x")])
+    cfg = _setup_import(monkeypatch, tmp_path, {}, {"s1": msg})
+
+    result = _run(cfg)
+    assert result.added == 0
+    assert result.needs_parser == ["me@gmail.test | mailquill（沒有可匯入的 PDF/CSV 附件）"]
+
+
+def test_message_under_both_labels_goes_through_import_once(monkeypatch, tmp_path):
+    pdf = _encrypted_pdf(["2026-06-01 PXMART 1,200"], "PW1")
+    msg = _self_mail("s1", [Attachment("fubon.pdf", "application/pdf", pdf)])
+    cfg = _setup_import(monkeypatch, tmp_path, {"s1": msg}, {"s1": msg})
+    monkeypatch.setattr(pipeline, "get_parser", lambda m: None)
+
+    result = _run(cfg)
+    assert result.fetched == 1
+    assert result.added == 1
+    assert result.needs_parser == []
+
+
+def test_bank_mail_still_routed_by_sender_with_import_label_set(monkeypatch, tmp_path):
+    from mailquill.parsers.example_bank import ExampleBankParser
+    pdf = _encrypted_pdf(["2026-06-01 PXMART 1,200"], "PW1")
+    bank = EmailMessage(msg_id="b1", sender="ebill@example-bank.test", subject="帳單",
+                        date="", body_text="",
+                        attachments=[Attachment("stmt.pdf", "application/pdf", pdf)])
+    cfg = _setup_import(monkeypatch, tmp_path, {"b1": bank}, {})
+    monkeypatch.setattr(pipeline, "get_parser", lambda m: ExampleBankParser())
+
+    result = _run(cfg)
+    assert result.added == 1
+    assert result.imported == []

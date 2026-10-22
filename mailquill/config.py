@@ -21,6 +21,10 @@ class Config:
     sheets_state_path: str = "sheets_state.json"
     seen_ids_path: str = "seen_msg_ids.txt"  # 見 store.read_seen_ids
     bills_path: str = "bills.csv"  # 帳單應繳總額/最低應繳（見 bill_due.py）
+    # 手動下載的帳單（富邦 PDF、Amex CSV…）寄給自己後貼的 Gmail Label。這個
+    # label 底下的信不看寄件人，直接把 PDF/CSV 附件依內容挑 parser 匯入
+    # （同 `mailquill ingest`）。留空則停用。見 config.example.yaml。
+    import_label: str = ""
     # 富邦轉帳通知信「只認這個收款帳戶」的比對片段（例：["008(華南銀行)", "1234"]）。
     # 每個片段都要出現在信件內文才算命中；留空則停用轉帳房租解析。見 config.example.yaml。
     fubon_rent_dest_signature: list[str] = field(default_factory=list)

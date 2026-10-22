@@ -55,8 +55,9 @@ source .venv/bin/activate          # 之後所有指令都在這個 venv 裡跑
 pip install -e .                   # 安裝
 pip install -e ".[dev]"            # 含測試相依(選用)
 
-# HSBC 帳單商家名稱是內嵌圖片、需 OCR 才能解析，額外裝系統 tesseract：
-brew install tesseract tesseract-lang         # macOS；只用不到 HSBC 可略過
+# HSBC／中信帳單商家名稱是內嵌圖片、需 OCR 才能解析。macOS 用系統內建的
+# Vision（隨 pip install 裝好 ocrmac，免裝其他東西）；其他平台裝 tesseract：
+sudo apt install tesseract-ocr tesseract-ocr-chi-tra   # Linux；只用不到 HSBC/中信可略過
 
 # 1) 設定 Google OAuth、config.yaml、passwords.txt（見 docs/SETUP.md）
 # 2) 從既有 Gmail Label 產生抓取規則草稿，檢查後即可
@@ -88,7 +89,7 @@ mailquill report        # → report.html，用瀏覽器打開
 
 跑完會印一行總結（新增幾筆、合併幾筆、Sheet 網址），接著附上各銀行同步狀態（同 `mailquill status`），哪家漏抓一眼就看得到。中間若出現「待補 parser / 解析警告 / 抓取失敗」，處理完再跑一次即可，已入帳的信不會重複。
 
-需要手動下載帳單的銀行（富邦 PDF、Amex CSV）例外：先 `mailquill ingest <檔案>` 匯入，再跑一次 `mailquill update` 同步上去。
+需要手動下載帳單的銀行（富邦 PDF、Amex CSV）例外：下載後**寄給自己**（設好 `import_label`，見下方「富邦」一節），下次 `update` 就會自動匯入；或在本機 `mailquill ingest <檔案>` 匯入後再跑一次 `mailquill update`。
 
 想確認每家銀行的最新帳單有沒有都進來，跑 `mailquill status`（只讀本地資料、不連 Gmail）：列出各銀行最新帳單月份、月結單交易／每日通知各到哪一天，落後的會標 ⚠️／❌。
 
@@ -230,7 +231,7 @@ mailquill rebuild --db /tmp/scratch.db
 | 台新 Taishin / Richart | `taishin` | Gmail 內文／附件 | ✅ |
 | 玉山銀行 E.SUN | `esun` | Gmail 附件 PDF | ✅ |
 | 永豐銀行 SinoPac | `sinopac` | Gmail 附件 PDF | ✅ |
-| 滙豐(台灣) HSBC | `hsbc` | Gmail 附件 PDF（商家名稱靠 OCR，需系統裝 tesseract） | ✅ |
+| 滙豐(台灣) HSBC | `hsbc` | Gmail 附件 PDF（商家名稱靠 OCR：macOS Vision 或 tesseract） | ✅ |
 | 富邦銀行 Fubon | `fubon` | ⚠️ 需手動下載 PDF | ✅ parser 就緒 |
 
 ### ⚠️ 富邦：目前需手動下載後本地解析
@@ -238,7 +239,11 @@ mailquill rebuild --db /tmp/scratch.db
 富邦的電子帳單不以附件寄送，而是信中放一條外部連結，且下載前要在網站上填**身分證字號／生日／驗證碼**，無法自動抓取。因此流程是：
 
 1. 依帳單信件的連結，自行到富邦網站下載該期 PDF。
-2. 用本地匯入指令解析（不經 Gmail）：
+2. **寄給自己**（手機也行）：寄到 `你的帳號+mailquill@gmail.com`、附上 PDF。Gmail
+   篩選器（條件 `from:me to:你的帳號+mailquill@gmail.com`，貼上 `import_label`、
+   略過收件匣）會把它歸檔，下次 `run`／`update` 依 PDF 內容自動認出是富邦並匯入。
+   Amex／中信的 CSV 也一樣寄。同一份帳單寄兩次也不會重複入帳。
+3. 或用本地匯入指令解析（不經 Gmail）：
 
 ```bash
 mailquill ingest --bank fubon 115年02月.pdf      # 單一檔
