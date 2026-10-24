@@ -282,6 +282,27 @@ def test_run_pipeline_skips_refetch_for_already_seen_message(monkeypatch, tmp_pa
     assert len(rows) == 1  # 沒有重複寫入
 
 
+def test_run_pipeline_skips_metadata_for_already_seen_message(monkeypatch, tmp_path):
+    # 已處理過的信連標頭都不用抓：每次 run 只剩列信件 ID 的請求，舊信再多也不會變慢。
+    from mailquill.parsers.example_bank import ExampleBankParser
+    msg = EmailMessage(msg_id="m1", sender="ebill@example-bank.test", subject="帳單",
+                       date="", body_text="2026-06-01 PXMART 1,200", attachments=[])
+    cfg = _setup_common(monkeypatch, tmp_path, {"m1": msg},
+                        parser_for=lambda m: ExampleBankParser())
+    pipeline.run_pipeline(service=object(), cfg=cfg, imported_at="2026-06-24T10:00:00")
+
+    def boom(service, mid):
+        raise AssertionError("已處理過的信不該再呼叫 get_message_metadata")
+
+    monkeypatch.setattr(pipeline, "get_message_metadata", boom)
+    second = pipeline.run_pipeline(service=object(), cfg=cfg,
+                                   imported_at="2026-06-24T10:05:00")
+    assert second.fetch_failures == []
+    assert second.matched == 1
+    assert second.already_seen == 1
+    assert second.added == 0
+
+
 def test_run_pipeline_force_refetch_bypasses_seen_cache(monkeypatch, tmp_path):
     from mailquill.parsers.example_bank import ExampleBankParser
     msg = EmailMessage(msg_id="m1", sender="ebill@example-bank.test", subject="帳單",

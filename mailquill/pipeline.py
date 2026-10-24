@@ -182,6 +182,12 @@ def run_pipeline(service, cfg: Config, imported_at: str,
         done += 1
         if on_progress:
             on_progress(done, total)
+        # 處理過的信當初一定符合規則，連標頭都不用抓——每次 run 掃的是今年
+        # 全部的信，舊信越積越多，這裡省下的就是每封一次 API 請求。
+        if mid in seen_msg_ids:
+            result.matched += 1
+            result.already_seen += 1
+            continue
         # 先用輕量標頭過濾，不符合規則的就不下載完整信件與附件。
         # 單封信抓取失敗(網路逾時等)不應中斷整批 — 記錄後跳過，重跑可靠去重補回。
         try:
@@ -192,9 +198,6 @@ def run_pipeline(service, cfg: Config, imported_at: str,
         if not matches(rules, sender, subject):
             continue
         result.matched += 1
-        if mid in seen_msg_ids:
-            result.already_seen += 1
-            continue
 
         try:
             msg = extract_message(service, mid)
