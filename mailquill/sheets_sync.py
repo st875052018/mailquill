@@ -430,6 +430,32 @@ def _bill_status_rows(txns, bills: list[BillDue], today: str) -> list[list]:
     return rows
 
 
+def _bill_month_total_row(txns, bills: list[BillDue], today: str) -> list:
+    """疊在「帳單」小表最上面的本月應繳合計：只加帳單月份是本月的那幾期
+    （上個月的那期已經繳過了），金額對齊下面應繳總額／最低應繳兩欄，第四格
+    註明哪幾家還沒算進來——本月帳單未到的列「未到」，明細已到但沒有應繳
+    金額資料的（如 Amex）列「沒有金額」，避免把不完整的合計當成全部。"""
+    month = today[:7]
+    this_month = {b.bank: b for b in bills if b.period == month}
+    missing, no_amount = [], []
+    for st in bank_statuses(txns, bills, today):
+        if st.bank in this_month:
+            continue
+        if st.months_behind is not None and st.months_behind <= 0:
+            no_amount.append(st.bank)
+        else:
+            missing.append(st.bank)
+    notes = []
+    if missing:
+        notes.append("未到 " + "、".join(missing))
+    if no_amount:
+        notes.append("、".join(no_amount) + " 沒有金額")
+    return [f"{int(month[5:])}月應繳",
+            sum(_to_float(b.amount_due) for b in this_month.values()),
+            sum(_to_float(b.min_due) for b in this_month.values() if b.min_due),
+            "；".join(notes) or "全部到齊"]
+
+
 def budget_info_row(month: str | None, currency: str) -> list:
     """Budget 分頁第 1 列的月份/幣別說明文字（如「月份：2026-08　幣別：
     TWD」），對應「實際」欄算的是哪個月、哪個幣別；每次同步都重寫（純文字，
@@ -610,11 +636,12 @@ def _charts_to_draw(tables: ChartsTables) -> list[tuple[int, list[list], str, st
 
 @dataclass
 class OverviewLayout:
-    """Overview 整頁的格子與各區塊位置（0-based 列/欄）。由上往下：帳單小表
-    （有資料才出現，後面空一列）→ 圖表區（每張 `_OVERVIEW_CHART_ROWS` 列的
+    """Overview 整頁的格子與各區塊位置（0-based 列/欄）。由上往下：本月應繳
+    合計列 + 帳單小表（有資料才出現，後面空一列）→ 圖表區（每張 `_OVERVIEW_CHART_ROWS` 列的
     空白列，圖表浮在上面）→ 幣別矩陣。圖表來源表貼在 `data_col` 起的隱藏欄。"""
     rows: list[list]
     blocks: list[dict]           # 幣別矩陣，start 已是整頁的絕對列
+    bill_total_row: int | None   # 本月應繳合計列；沒有帳單資料為 None
     bill_start: int | None       # 帳單表頭列；沒有帳單資料為 None
     num_bill_rows: int           # 帳單資料列數（不含表頭）
     chart_row: int               # 第一張圖表的錨點列
@@ -625,6 +652,8 @@ class OverviewLayout:
 def _overview_layout(txns, bills: list[BillDue], today: str,
                      aliases: dict[str, str] | None = None) -> OverviewLayout:
     bill_rows = _bill_status_rows(txns, bills, today)
+    if bill_rows:
+        bill_rows = [_bill_month_total_row(txns, bills, today)] + bill_rows
     tables = _charts_page_tables(txns, aliases)
     matrix_rows, blocks = _combined_overview_rows_and_blocks(txns, aliases)
 
@@ -642,8 +671,9 @@ def _overview_layout(txns, bills: list[BillDue], today: str,
             rows.append([])
         rows[i] = list(rows[i]) + [""] * (data_col - len(rows[i])) + extra
     return OverviewLayout(rows=rows, blocks=blocks,
-                          bill_start=0 if bill_rows else None,
-                          num_bill_rows=max(len(bill_rows) - 1, 0),
+                          bill_total_row=0 if bill_rows else None,
+                          bill_start=1 if bill_rows else None,
+                          num_bill_rows=max(len(bill_rows) - 2, 0),
                           chart_row=chart_row, data_col=data_col, tables=tables)
 
 
@@ -1366,6 +1396,21 @@ def build_bill_status_format_requests(sheet_id: int, start_row: int, num_data_ro
     return requests
 
 
+def build_bill_total_format_requests(sheet_id: int, row: int) -> list[dict]:
+    """本月應繳合計列（見 `_bill_month_total_row`）：整列粗體、金額千分位，
+    第四格的備註合併到表尾（D:G），長備註不會撐寬「明細至」那一欄。"""
+    return [
+        _bold(sheet_id, row, row + 1, 0, _BILL_STATUS_COLS),
+        {"repeatCell": {
+            "range": _range(sheet_id, row, row + 1, *_BILL_AMOUNT_COLS),
+            "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": "#,##0"}}},
+            "fields": "userEnteredFormat.numberFormat"}},
+        {"mergeCells": {"range": _range(sheet_id, row, row + 1, _BILL_AMOUNT_COLS[1],
+                                        _BILL_STATUS_COLS),
+                        "mergeType": "MERGE_ALL"}},
+    ]
+
+
 def build_budget_format_requests(sheet_id: int, num_data_rows: int = len(BUDGET_CATEGORIES)) -> list[dict]:
     """Budget 分頁的版面 requests：第 1 列是月份/幣別說明（見 `budget_info_row`，
     每次同步都重寫但只是文字說明，不是使用者填的資料）、第 2 列是表頭
@@ -1749,10 +1794,15 @@ def sync_sheets(csv_path: str, state_path: str, service, title: str = "mailquill
     _write_tab(service, spreadsheet_id, OVERVIEW_TITLE, layout.rows)
     overview_max_cols = max([b["num_accounts"] + 2 for b in layout.blocks]
                             + ([_BILL_STATUS_COLS] if layout.bill_start is not None else []))
+    # 合計列的備註格合併到表尾，不拿來算欄寬
+    width_rows = [r[:_BILL_AMOUNT_COLS[1]] if i == layout.bill_total_row else r
+                  for i, r in enumerate(layout.rows)]
     requests += build_combined_overview_format_requests(
         sheet_ids[OVERVIEW_TITLE], layout.blocks,
-        column_widths=_column_pixel_widths(layout.rows, overview_max_cols))
+        column_widths=_column_pixel_widths(width_rows, overview_max_cols))
     if layout.bill_start is not None:
+        requests += build_bill_total_format_requests(
+            sheet_ids[OVERVIEW_TITLE], layout.bill_total_row)
         requests += build_bill_status_format_requests(
             sheet_ids[OVERVIEW_TITLE], layout.bill_start, layout.num_bill_rows)
     requests += build_overview_chart_requests(sheet_ids[OVERVIEW_TITLE], layout)

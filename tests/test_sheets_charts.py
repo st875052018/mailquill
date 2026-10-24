@@ -96,10 +96,12 @@ def _bill():
 def test_overview_layout_stacks_bills_then_charts_then_matrix():
     layout = _overview_layout(_TXNS, [_bill()], today="2026-06-30")
     rows = layout.rows
-    assert layout.bill_start == 0 and rows[0][0] == "帳單"
+    # 最上面是本月應繳合計，接著才是帳單表頭
+    assert layout.bill_total_row == 0 and rows[0][0] == "6月應繳"
+    assert layout.bill_start == 1 and rows[1][0] == "帳單"
     # 有交易或帳單的銀行各一列（Amex/Cathay/Fubon/HSBC）
     assert layout.num_bill_rows == 4
-    assert [r[0] for r in rows[1:5]] == ["Amex", "Cathay", "Fubon", "HSBC"]
+    assert [r[0] for r in rows[2:6]] == ["Amex", "Cathay", "Fubon", "HSBC"]
     # 帳單（表頭+銀行列）後空一列，圖表從下一列開始
     chart_row = layout.chart_row
     assert rows[chart_row - 1][:1] in ([], [""])
@@ -114,7 +116,8 @@ def test_overview_layout_stacks_bills_then_charts_then_matrix():
 
 def test_overview_layout_skips_space_for_charts_without_data():
     layout = _overview_layout([], [], today="2026-06-30")
-    assert layout.bill_start is None and layout.chart_row == 0
+    assert layout.bill_start is None and layout.bill_total_row is None
+    assert layout.chart_row == 0
     assert layout.blocks[0]["start"] == 0  # 沒有帳單也沒有圖表 → 矩陣直接從最上面開始
 
 

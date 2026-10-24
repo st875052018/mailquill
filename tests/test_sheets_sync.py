@@ -1423,6 +1423,42 @@ def test_bill_status_rows_empty_without_data():
     assert _bill_status_rows([], [], today="2026-09-30") == []
 
 
+def test_bill_month_total_row_sums_this_months_bills():
+    from mailquill.sheets_sync import _bill_month_total_row
+    txns = [_stmt_txn("b", "Amex", "2026-09-16", source_type="csv")]
+    bills = [_bill("CTBC", "2026-10", "17765", "1800"),
+             _bill("Cathay", "2026-10", "43184", "4328"),
+             _bill("Fubon", "2026-09", "2810", "800"),     # 上個月的已經繳過，不算
+             _bill("HSBC", "2026-10", "22898", "")]        # 最低應繳缺的當 0
+    row = _bill_month_total_row(txns, bills, today="2026-10-24")
+    assert row == ["10月應繳", 83847.0, 6128.0, "未到 Amex、Fubon"]
+
+
+def test_bill_month_total_row_flags_arrived_bill_without_amount():
+    # Amex 本月明細已到但沒有應繳金額資料：不是「未到」，是金額沒算進去
+    from mailquill.sheets_sync import _bill_month_total_row
+    txns = [_stmt_txn("b", "Amex", "2026-10-16", source_type="csv")]
+    row = _bill_month_total_row(txns, [_bill("HSBC", "2026-10", "100", "10")],
+                                today="2026-10-24")
+    assert row == ["10月應繳", 100.0, 10.0, "Amex 沒有金額"]
+
+
+def test_bill_month_total_row_all_in():
+    from mailquill.sheets_sync import _bill_month_total_row
+    row = _bill_month_total_row([], [_bill("HSBC", "2026-10", "100", "10")], today="2026-10-24")
+    assert row == ["10月應繳", 100.0, 10.0, "全部到齊"]
+
+
+def test_build_bill_total_format_requests():
+    from mailquill.sheets_sync import build_bill_total_format_requests
+    reqs = build_bill_total_format_requests(sheet_id=3, row=0)
+    merge = next(r["mergeCells"]["range"] for r in reqs if "mergeCells" in r)
+    assert (merge["startRowIndex"], merge["startColumnIndex"], merge["endColumnIndex"]) == (0, 3, 7)
+    num = next(r["repeatCell"]["range"] for r in reqs if "repeatCell" in r
+               and "numberFormat" in r["repeatCell"]["cell"]["userEnteredFormat"])
+    assert (num["startColumnIndex"], num["endColumnIndex"], num["startRowIndex"]) == (1, 3, 0)
+
+
 def test_build_bill_status_format_requests():
     from mailquill.sheets_sync import build_bill_status_format_requests
     assert build_bill_status_format_requests(sheet_id=3, start_row=20, num_data_rows=0) == []
@@ -1453,7 +1489,8 @@ def test_sync_sheets_puts_single_bill_status_block_at_top_of_overview(tmp_path):
 
     rows = next(u for u in service.updated if u[1] == f"{OVERVIEW_TITLE}!A1")[3]["values"]
     idx = [i for i, r in enumerate(rows) if r and r[0] == "帳單"]
-    assert idx == [0]                          # 只有一張合併後的表，放最上面（最需要行動）
+    assert idx == [1]                          # 只有一張合併後的表，放最上面（最需要行動）
+    assert rows[0][:4] == ["9月應繳", 0, 0, "未到 HSBC"]   # 最上面是本月應繳合計
     assert rows[idx[0] + 2][:1] in ([], [""])  # 隔一空列跟下面的圖表分開
     row = rows[idx[0] + 1]
     assert row[:3] == ["HSBC", 19711.0, 2233.0]
